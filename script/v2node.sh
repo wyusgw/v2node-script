@@ -107,7 +107,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/script/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -424,6 +424,7 @@ generate_v2node_config() {
         local api_host="$1"
         local node_id="$2"
         local api_key="$3"
+        local node_type="$4"
 
         mkdir -p /etc/v2node >/dev/null 2>&1
         cat > /etc/v2node/config.json <<EOF
@@ -437,6 +438,7 @@ generate_v2node_config() {
         {
             "ApiHost": "${api_host}",
             "NodeID": ${node_id},
+            "NodeType": "${node_type}",
             "ApiKey": "${api_key}",
             "Timeout": 15
         }
@@ -466,10 +468,12 @@ generate_config_file() {
     api_host=${api_host:-https://example.com/}
     read -rp "节点ID: " node_id
     node_id=${node_id:-1}
+    read -rp "节点类型: " node_type
+    node_type=${node_type:-vmess}
     read -rp "节点通讯密钥: " api_key
 
     # 生成配置文件（覆盖可能从包中复制的模板）
-    generate_v2node_config "$api_host" "$node_id" "$api_key"
+    generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type"
 }
 
 # 放开防火墙端口

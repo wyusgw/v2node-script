@@ -381,7 +381,7 @@ EOF
     fi
 
 
-    curl -o /usr/bin/v2node -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/script/v2node.sh
+    curl -o /usr/bin/v2node -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/v2node.sh
     chmod +x /usr/bin/v2node
 
     cd $cur_dir

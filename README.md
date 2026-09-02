@@ -7,5 +7,5 @@ A v2board backend base on moddified xray-core.
 ### 一键安装
 
 ```
-wget -N https://raw.githubusercontent.com/wyusgw/v2node-script/script/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh && bash install.sh
 ```

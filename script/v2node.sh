@@ -420,6 +420,26 @@ show_v2node_version() {
     fi
 }
 
+choose_node_type() {
+    local options=("vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru" "wireguard")
+    echo "请选择节点类型:" >&2
+    local i=1
+    for opt in "${options[@]}"; do
+        echo "  $i) $opt" >&2
+        i=$((i+1))
+    done
+    local choice
+    while true; do
+        read -rp "输入序号 [默认: 1) vmess]: " choice
+        choice=${choice:-1}
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+            echo "${options[$((choice-1))]}"
+            return 0
+        fi
+        echo "输入无效，请输入 1-${#options[@]} 之间的数字" >&2
+    done
+}
+
 generate_v2node_config() {
         local api_host="$1"
         local node_id="$2"
@@ -468,8 +488,7 @@ generate_config_file() {
     api_host=${api_host:-https://example.com/}
     read -rp "节点ID: " node_id
     node_id=${node_id:-1}
-    read -rp "节点类型: " node_type
-    node_type=${node_type:-vmess}
+    node_type=$(choose_node_type)
     read -rp "节点通讯密钥: " api_key
 
     # 生成配置文件（覆盖可能从包中复制的模板）
@@ -517,7 +536,7 @@ show_usage() {
 show_menu() {
     echo -e "
   ${green}v2node 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/wyx2685/v2node ---
+--- https://github.com/wyusgw/v2node ---
   ${green}0.${plain} 修改配置
 ————————————————
   ${green}1.${plain} 安装 v2node

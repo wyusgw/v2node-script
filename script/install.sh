@@ -54,8 +54,9 @@ parse_args() {
             --api-key)
                 API_KEY_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--node-type TYPE] [--api-key KEY]"
-                echo "节点类型: vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
+                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE]"
+                echo "--node-type 可省略：省略时协议由面板 API 自动判断（对应后台的 v2node 节点类型）"
+                echo "如需固定为某个协议专属表，可指定：vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
                 exit 0 ;;
             --*)
                 echo "未知参数: $1"; exit 1 ;;
@@ -223,7 +224,8 @@ check_status() {
 }
 
 choose_node_type() {
-    local options=("vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru" "wireguard")
+    local options=("auto（由面板 API 自动判断协议，推荐）" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
+    local values=("v2node" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
     echo "请选择节点类型:" >&2
     local i=1
     for opt in "${options[@]}"; do
@@ -232,13 +234,13 @@ choose_node_type() {
     done
     local choice
     while true; do
-        read -rp "输入序号 [默认: 1) vmess]: " choice
+        read -rp "输入序号 [默认: 1) auto]: " choice
         choice=${choice:-1}
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
-            echo "${options[$((choice-1))]}"
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#values[@]} )); then
+            echo "${values[$((choice-1))]}"
             return 0
         fi
-        echo "输入无效，请输入 1-${#options[@]} 之间的数字" >&2
+        echo "输入无效，请输入 1-${#values[@]} 之间的数字" >&2
     done
 }
 
@@ -246,7 +248,7 @@ generate_v2node_config() {
         local api_host="$1"
         local node_id="$2"
         local api_key="$3"
-        local node_type="$4"
+        local node_type="${4:-v2node}"
 
         mkdir -p /etc/v2node >/dev/null 2>&1
         cat > /etc/v2node/config.json <<EOF
@@ -375,12 +377,11 @@ EOF
 
     if [[ ! -f /etc/v2node/config.json ]]; then
         # 如果通过 CLI 传入了完整参数，则直接生成配置并跳过交互
-        if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" && -n "$NODE_TYPE_ARG" ]]; then
+        if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
             generate_v2node_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG" "$NODE_TYPE_ARG"
             echo -e "${green}已根据参数生成 /etc/v2node/config.json${plain}"
             first_install=false
         else
-            cp config.json /etc/v2node/
             first_install=true
         fi
     else
@@ -434,10 +435,9 @@ EOF
             api_host=${api_host:-https://example.com/}
             read -rp "节点ID: " node_id
             node_id=${node_id:-1}
-            node_type=$(choose_node_type)
             read -rp "节点通讯密钥: " api_key
+            node_type=$(choose_node_type)
 
-            # 生成配置文件（覆盖可能从包中复制的模板）
             generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type"
         else
             echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"

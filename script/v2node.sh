@@ -760,24 +760,24 @@ show_enable_status() {
 # 在主菜单里列出其他实例（/etc/v2node/instances/ 下每个文件夹算一个）和各自
 # 的运行状态，不用再进多实例子菜单才能看到
 show_instances_status() {
-    if [[ ! -d /etc/v2node/instances ]]; then
-        return 0
-    fi
     local d name has_any=0
-    for d in /etc/v2node/instances/*/; do
-        [[ -e "$d" ]] || continue
-        has_any=1
-        name=$(basename "$d")
-        check_status "$name"
-        case $? in
-            0) echo -e "  实例 [${name}]: ${green}已运行${plain}" ;;
-            1) echo -e "  实例 [${name}]: ${yellow}未运行${plain}" ;;
-            *) echo -e "  实例 [${name}]: ${red}未知${plain}" ;;
-        esac
-    done
-    if [[ $has_any == 1 ]]; then
-        echo "————————————————"
+    if [[ -d /etc/v2node/instances ]]; then
+        for d in /etc/v2node/instances/*/; do
+            [[ -e "$d" ]] || continue
+            has_any=1
+            name=$(basename "$d")
+            check_status "$name"
+            case $? in
+                0) echo -e "  实例 [${name}]: ${green}已运行${plain}" ;;
+                1) echo -e "  实例 [${name}]: ${yellow}未运行${plain}" ;;
+                *) echo -e "  实例 [${name}]: ${red}未知${plain}" ;;
+            esac
+        done
     fi
+    if [[ $has_any == 0 ]]; then
+        echo "  目前没有其他实例（可用菜单里的「管理多实例」新增）"
+    fi
+    echo "————————————————"
 }
 
 show_v2node_version() {

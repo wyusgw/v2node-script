@@ -429,7 +429,7 @@ description="v2node"
 if [ "\$SVCNAME" = "v2node" ]; then
     v2node_cfg="/etc/v2node/config.json"
 else
-    v2node_cfg="/etc/v2node/\${SVCNAME#v2node.}.json"
+    v2node_cfg="/etc/v2node/instances/\${SVCNAME#v2node.}/config.json"
 fi
 
 command="/usr/local/v2node/v2node"
@@ -496,7 +496,7 @@ LimitRSS=infinity
 LimitCORE=infinity
 LimitNOFILE=999999
 WorkingDirectory=/usr/local/v2node/
-ExecStart=/usr/local/v2node/v2node server -c /etc/v2node/%i.json
+ExecStart=/usr/local/v2node/v2node server -c /etc/v2node/instances/%i/config.json
 Restart=always
 RestartSec=10
 

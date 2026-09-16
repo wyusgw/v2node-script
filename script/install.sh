@@ -267,12 +267,16 @@ check_status() {
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
+    # 用配置文件是否存在判断这个实例有没有配置过，而不是去 grep
+    # systemctl list-unit-files——template unit 实例化出来的具体单元名
+    # （如 v2node@test.service）通常不会出现在 list-unit-files 里，之前
+    # 这样判断会导致命名实例明明装好在跑，却一直被判定成"未安装"
+    if [[ ! -f "$(instance_config_path "$instance")" ]]; then
+        return 2
+    fi
     if [[ x"${release}" == x"alpine" ]]; then
         local init=$(instance_init_name "$instance")
-        if [[ ! -e /etc/init.d/${init} ]]; then
-            return 2
-        fi
-        temp=$(service ${init} status | awk '{print $3}')
+        temp=$(service ${init} status 2>/dev/null | awk '{print $3}')
         if [[ x"${temp}" == x"started" ]]; then
             return 0
         else
@@ -280,10 +284,7 @@ check_status() {
         fi
     else
         local svc=$(instance_service_name "$instance")
-        if ! systemctl list-unit-files | grep -q "^${svc}\.service"; then
-            return 2
-        fi
-        temp=$(systemctl status ${svc} | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+        temp=$(systemctl status ${svc} 2>/dev/null | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
         if [[ x"${temp}" == x"running" ]]; then
             return 0
         else
@@ -373,7 +374,7 @@ install_v2node() {
     # geoip/geosite 是所有实例共用的一份，只有配置和 service 是各实例独立的。
     if [[ -n "$instance" && -f /usr/local/v2node/v2node ]]; then
         echo -e "${green}检测到 v2node 主程序已安装，跳过重新下载，仅为实例 [${instance}] 配置服务${plain}"
-        last_version=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $NF}')
+        last_version=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
     else
     if [[ -e /usr/local/v2node/ ]]; then
         rm -rf /usr/local/v2node/

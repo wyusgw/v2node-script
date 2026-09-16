@@ -77,6 +77,18 @@ parse_args() {
     done
 }
 
+is_cmd_exist() {
+    local cmd="$1"
+    if [ -z "$cmd" ]; then
+        return 1
+    fi
+    which "$cmd" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        return 0
+    fi
+    return 2
+}
+
 # 实例名为空时对应原本的默认实例（/etc/v2node/config.json, v2node.service），
 # 保证没有用到 --instance 的既有用法完全不受影响
 instance_service_name() {
@@ -128,6 +140,8 @@ else
     arch="64"
     echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
 fi
+
+echo "系统: ${release}  架构: ${arch}"
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
     echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
@@ -530,9 +544,9 @@ EOF
 
     cd $cur_dir
     rm -f install.sh
-    echo "------------------------------------------"
+    echo "----------------------------------------------------------"
     echo -e "管理脚本使用方法: "
-    echo "------------------------------------------"
+    echo "----------------------------------------------------------"
     echo "v2node                         - 显示管理菜单 (功能更多)"
     echo "v2node list                    - 列出已有实例及状态"
     echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
@@ -551,7 +565,7 @@ EOF
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看 v2node 版本"
-    echo "------------------------------------------"
+    echo "----------------------------------------------------------"
     # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
     if [[ $first_install == true ]]; then
@@ -585,6 +599,14 @@ EOF
         fi
     fi
 }
+
+if [[ x"${release}" != x"alpine" ]]; then
+    is_cmd_exist "systemctl"
+    if [[ $? != 0 ]]; then
+        echo -e "${red}systemctl 命令不存在，请使用较新版本的系统，例如 Ubuntu 18+、Debian 9+${plain}"
+        exit 1
+    fi
+fi
 
 parse_args "$@"
 echo -e "${green}开始安装${plain}"

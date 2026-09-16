@@ -7,6 +7,10 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
+SCRIPT_VERSION="1.0.0"
+# 当前主菜单聚焦的实例名，空字符串代表默认实例；在主菜单输入实例名可以切换
+CURRENT_INSTANCE=""
+
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
@@ -76,6 +80,18 @@ elif [[ x"${release}" == x"debian" ]]; then
     fi
 fi
 
+is_cmd_exist() {
+    local cmd="$1"
+    if [ -z "$cmd" ]; then
+        return 1
+    fi
+    which "$cmd" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        return 0
+    fi
+    return 2
+}
+
 # 实例名为空时对应默认实例（/etc/v2node/config.json, v2node.service），
 # 保证不带实例名的既有用法完全不受影响
 instance_service_name() {
@@ -119,6 +135,30 @@ instance_label() {
     else
         echo "实例 [$1]"
     fi
+}
+
+# 主菜单"管理实例 [xxx]"里显示的名字：默认实例显示为 default
+instance_display_name() {
+    if [[ -z "$1" ]]; then
+        echo "default"
+    else
+        echo "$1"
+    fi
+}
+
+# 校验输入的名字是不是一个存在的实例（default 或某个命名实例），是的话把
+# CURRENT_INSTANCE 切过去，供主菜单直接输入实例名来切换焦点
+select_instance() {
+    local name="$1"
+    if [[ "$name" == "default" ]]; then
+        CURRENT_INSTANCE=""
+        return 0
+    fi
+    if [[ -f "$(instance_config_path "$name")" ]]; then
+        CURRENT_INSTANCE="$name"
+        return 0
+    fi
+    return 1
 }
 
 confirm() {
@@ -529,29 +569,6 @@ list() {
     fi
 }
 
-# 在主菜单里列出命名实例（/etc/v2node/instances/ 下每个文件夹算一个）和各自
-# 的运行状态，不用再进多实例子菜单才能看到；默认实例已经由 show_status 显示过
-show_instances_status() {
-    local d name has_any=0
-    if [[ -d /etc/v2node/instances ]]; then
-        for d in /etc/v2node/instances/*/; do
-            [[ -e "$d" ]] || continue
-            has_any=1
-            name=$(basename "$d")
-            check_status "$name"
-            case $? in
-                0) echo -e "  实例 [${name}]: ${green}已运行${plain}" ;;
-                1) echo -e "  实例 [${name}]: ${yellow}未运行${plain}" ;;
-                *) echo -e "  实例 [${name}]: ${red}未知${plain}" ;;
-            esac
-        done
-    fi
-    if [[ $has_any == 0 ]]; then
-        echo "  目前没有其他实例（可用菜单里的「管理多实例」新增）"
-    fi
-    echo "————————————————"
-}
-
 # 新建一个命名实例（v2node new <name>），交互式收集面板信息后委托给
 # install.sh --instance 处理（下载/跳过下载共用二进制、写 service、生成配置）
 new() {
@@ -661,70 +678,119 @@ rename() {
     echo -e "${green}实例 [${old}] 已重命名为 [${new_name}]${plain}"
 }
 
-instance_menu() {
+# 管理单一实例的子菜单（主菜单「管理实例 [xxx]」进来的），default 实例不给
+# 重命名/移除，要移除默认实例请走「完全卸载」
+instance_submenu() {
+    local name="$1"
+    local max=8
     echo -e "
-  ${green}多实例管理${plain} — 在同一台机器再跑一个独立 v2node 进程
+  ${green}管理实例 [$(instance_display_name "$name")]${plain}
 ————————————————
-  ${green}1.${plain} 列出已有实例
-  ${green}2.${plain} 新增实例
-  ${green}3.${plain} 移除实例
-  ${green}4.${plain} 重命名实例
-  ${green}5.${plain} 启动实例
-  ${green}6.${plain} 停止实例
-  ${green}7.${plain} 重启实例
-  ${green}8.${plain} 查看实例状态
-  ${green}9.${plain} 查看实例日志
-  ${green}10.${plain} 设置实例开机自启
-  ${green}11.${plain} 取消实例开机自启
-  ${green}12.${plain} 编辑实例配置
-  ${green}13.${plain} 返回主菜单
- "
-    read -rp "请输入选择 [1-13]: " iop
-    local iname="" iname2=""
-    if [[ "$iop" != "1" && "$iop" != "2" && "$iop" != "3" && "$iop" != "13" ]]; then
-        read -rp "实例名: " iname
+  ${green}1.${plain} 启动
+  ${green}2.${plain} 停止
+  ${green}3.${plain} 重启
+  ${green}4.${plain} 查看状态
+  ${green}5.${plain} 查看日志
+  ${green}6.${plain} 设置开机自启
+  ${green}7.${plain} 取消开机自启
+  ${green}8.${plain} 编辑配置"
+    if [[ -n "$name" ]]; then
+        max=10
+        echo -e "  ${green}9.${plain} 重命名此实例
+  ${green}10.${plain} 移除此实例"
     fi
+    echo -e "  ${green}0.${plain} 返回主菜单
+ "
+    read -rp "请输入选择 [0-${max}]: " iop
     case "$iop" in
-        1) list ;;
-        2) new "" ;;
-        3) read -rp "要移除的实例名(可空格分隔多个): " iname; remove $iname ;;
-        4) read -rp "新名字: " iname2; rename "$iname" "$iname2" ;;
-        5) start "$iname" 0 ;;
-        6) stop "$iname" 0 ;;
-        7) restart "$iname" 0 ;;
-        8) status "$iname" 0 ;;
-        9) log "$iname" "" 0 ;;
-        10) enable "$iname" 0 ;;
-        11) disable "$iname" 0 ;;
-        12) config "$iname" 0 ;;
-        13) show_menu; return ;;
-        *) echo -e "${red}请输入正确的数字 [1-13]${plain}" ;;
+        0) show_menu; return ;;
+        1) start "$name" 0 ;;
+        2) stop "$name" 0 ;;
+        3) restart "$name" 0 ;;
+        4) status "$name" 0 ;;
+        5) log "$name" "" 0 ;;
+        6) enable "$name" 0 ;;
+        7) disable "$name" 0 ;;
+        8) config "$name" 0 ;;
+        9)
+            if [[ -n "$name" ]]; then
+                read -rp "新名字: " new_name
+                rename "$name" "$new_name" && CURRENT_INSTANCE="$new_name"
+            else
+                echo -e "${red}默认实例不支持重命名${plain}"
+            fi
+            ;;
+        10)
+            if [[ -n "$name" ]]; then
+                remove "$name" && CURRENT_INSTANCE=""
+            else
+                echo -e "${red}默认实例不支持移除，请用「完全卸载」${plain}"
+            fi
+            ;;
+        *) echo -e "${red}请输入正确的数字 [0-${max}]${plain}" ;;
     esac
     before_show_menu
 }
 
-show_status() {
-    check_status
-    case $? in
-        0)
-            echo -e "v2node状态: ${green}已运行${plain}"
-            show_enable_status
-            ;;
-        1)
-            echo -e "v2node状态: ${yellow}未运行${plain}"
-            show_enable_status
-            ;;
-        2)
-            echo -e "v2node状态: ${red}未安装${plain}"
-    esac
+# 主菜单顶部的版本信息行，跟 soga 一样实时查 GitHub 最新版本、有更新就提示
+show_version_header() {
+    local installed=""
+    if [[ -f /usr/local/v2node/v2node ]]; then
+        installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
+    fi
+    if [[ -n "$installed" ]]; then
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]"
+        local latest
+        latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ -n "$latest" && "$latest" != "$installed" ]]; then
+            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
+        fi
+    else
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]"
+    fi
 }
 
-show_enable_status() {
-    check_enabled
-    if [[ $? == 0 ]]; then
-        echo -e "是否开机自启: ${green}是${plain}"
+# 主菜单底部的实例列表：default + 所有命名实例，各自的运行状态/开机自启/
+# 配置文件路径都列出来，格式对齐 soga 的「实例列表」
+show_instance_list() {
+    echo ""
+    echo "  实例列表:"
+    local status_text enable_text
+    check_status ""
+    case $? in
+        0) status_text="${green}已运行${plain}" ;;
+        1) status_text="${yellow}未运行${plain}" ;;
+        *) status_text="${red}未安装${plain}" ;;
+    esac
+    check_enabled ""
+    if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
+    printf "    %-12s [%b] [自启: %b]  %s\n" "default" "$status_text" "$enable_text" "/etc/v2node/config.json"
+
+    local d name
+    if [[ -d /etc/v2node/instances ]]; then
+        for d in /etc/v2node/instances/*/; do
+            [[ -e "$d" ]] || continue
+            name=$(basename "$d")
+            check_status "$name"
+            case $? in
+                0) status_text="${green}已运行${plain}" ;;
+                1) status_text="${yellow}未运行${plain}" ;;
+                *) status_text="${red}未安装${plain}" ;;
+            esac
+            check_enabled "$name"
+            if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
+            printf "    %-12s [%b] [自启: %b]  %s\n" "$name" "$status_text" "$enable_text" "$(instance_config_path "$name")"
+        done
+    fi
+}
+
+# 安装/更新合并成一个入口：还没装就安装，已经装了就更新，对齐 soga 的「安装/更新」
+install_or_update() {
+    check_status ""
+    if [[ $? == 2 ]]; then
+        install
     else
-        echo -e "是否开机自启: ${red}否${plain}"
+        update
     fi
 }
 
@@ -844,7 +910,7 @@ open_ports() {
 
 show_usage() {
     echo "v2node 管理脚本使用方法: "
-    echo "------------------------------------------"
+    echo "----------------------------------------------------------"
     echo "v2node                         - 显示管理菜单 (功能更多)"
     echo "v2node list                    - 列出已有实例及状态"
     echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
@@ -864,62 +930,50 @@ show_usage() {
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看 v2node 版本"
     echo "v2node update_shell            - 更新管理脚本"
-    echo "------------------------------------------"
+    echo "----------------------------------------------------------"
 }
 
 show_menu() {
+    show_version_header
     echo -e "
-  ${green}v2node 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/wyusgw/v2node ---
-  ${green}0.${plain} 修改配置
+  ${green}0.${plain} 退出
 ————————————————
-  ${green}1.${plain} 安装 v2node
-  ${green}2.${plain} 更新 v2node
-  ${green}3.${plain} 卸载 v2node
+  ${green}1.${plain} 安装/更新 v2node
+  ${green}2.${plain} 完全卸载 v2node
 ————————————————
-  ${green}4.${plain} 启动 v2node
-  ${green}5.${plain} 停止 v2node
-  ${green}6.${plain} 重启 v2node
-  ${green}7.${plain} 查看 v2node 状态
-  ${green}8.${plain} 查看 v2node 日志
+  ${green}3.${plain} 更新管理脚本
+  ${green}4.${plain} 新增 v2node 实例
 ————————————————
-  ${green}9.${plain} 设置 v2node 开机自启
-  ${green}10.${plain} 取消 v2node 开机自启
-————————————————
-  ${green}11.${plain} 查看 v2node 版本
-  ${green}12.${plain} 升级 v2node 维护脚本
-  ${green}13.${plain} 生成 v2node 配置文件
-  ${green}14.${plain} 放行 VPS 的所有网络端口
-  ${green}15.${plain} 管理多实例（在本机再跑一个独立 v2node 进程）
-  ${green}16.${plain} 退出脚本
+  ${green}5.${plain} 管理实例 [$(instance_display_name "$CURRENT_INSTANCE")]
  "
- #后续更新可加入上方字符串中
-    show_status
-    show_instances_status
-    echo && read -rp "请输入选择 [0-16]: " num
+    show_instance_list
+    echo && read -rp "请输入选择 [0-5] 或 [实例名]: " num
 
     case "${num}" in
-        0) config ;;
-        1) check_uninstall && install ;;
-        2) check_install && update ;;
-        3) check_install && uninstall ;;
-        4) check_install && start ;;
-        5) check_install && stop ;;
-        6) check_install && restart ;;
-        7) check_install && status ;;
-        8) check_install && log ;;
-        9) check_install && enable ;;
-        10) check_install && disable ;;
-        11) check_install && show_v2node_version ;;
-        12) update_shell ;;
-        13) generate_config_file ;;
-        14) open_ports ;;
-        15) check_install && instance_menu ;;
-        16) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-16]${plain}" ;;
+        0) exit ;;
+        1) install_or_update ;;
+        2) check_install && uninstall ;;
+        3) update_shell ;;
+        4) new "" ;;
+        5) check_install && instance_submenu "$CURRENT_INSTANCE" ;;
+        *)
+            if select_instance "$num"; then
+                show_menu
+            else
+                echo -e "${red}请输入正确的数字 [0-5]，或是一个存在的实例名${plain}"
+                before_show_menu
+            fi
+            ;;
     esac
 }
 
+if [[ x"${release}" != x"alpine" ]]; then
+    is_cmd_exist "systemctl"
+    if [[ $? != 0 ]]; then
+        echo -e "${red}systemctl 命令不存在，请使用较新版本的系统，例如 Ubuntu 18+、Debian 9+${plain}"
+        exit 1
+    fi
+fi
 
 if [[ $# > 0 ]]; then
     case $1 in
@@ -948,6 +1002,7 @@ if [[ $# > 0 ]]; then
         "rename") check_install 0 && rename "$2" "$3" ;;
         "list") check_install 0 && list ;;
         "generate") generate_config_file ;;
+        "open_ports") open_ports ;;
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
         "version") check_install 0 && show_v2node_version 0 ;;

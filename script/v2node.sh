@@ -557,15 +557,18 @@ list() {
 # install.sh --instance 处理（下载/跳过下载共用二进制、写 service、生成配置）
 new() {
     local name="$1"
+    local silent="$2"
     if [[ -z "$name" ]]; then
         read -rp "请输入实例名(英文/数字，例如 nodeB): " name
     fi
     if [[ -z "$name" || "$name" == "config" ]]; then
         echo -e "${red}实例名不能为空${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
     if [[ -f "$(instance_config_path "$name")" ]]; then
         echo -e "${red}实例 [${name}] 已存在，如需修改配置请用: v2node config ${name}${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
 
@@ -589,6 +592,7 @@ new() {
 
     bash <(curl -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh) \
         --instance "$name" --api-host "$api_host" --node-id "$node_id" --api-key "$api_key" --node-type "$node_type"
+    if [[ -z "$silent" ]]; then before_show_menu; fi
 }
 
 # 移除一个或多个命名实例（v2node remove <name> [name...]），不影响默认实例
@@ -1004,7 +1008,7 @@ if [[ $# > 0 ]]; then
             ;;
         "config") check_install 0 && config "$2" 0 ;;
         "update") check_install 0 && update 0 $2 ;;
-        "new") new "$2" ;;
+        "new") new "$2" 0 ;;
         "remove") check_install 0 && remove "${@:2}" ;;
         "rename") check_install 0 && rename "$2" "$3" ;;
         "list") check_install 0 && list ;;

@@ -958,7 +958,7 @@ show_menu() {
     echo && read -rp "请输入选择 [0-${max}] 或 [实例名]: " num
 
     case "${num}" in
-        0|"") exit ;;
+        0|"") echo -e "${red}已退出 v2node 管理脚本${plain}" && exit ;;
         1) install_or_update ;;
         2) check_install && uninstall ;;
         3) update_shell ;;

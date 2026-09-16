@@ -164,14 +164,17 @@ confirm_restart() {
     confirm "是否重启v2node" "y"
     if [[ $? == 0 ]]; then
         restart
-    else
-        show_menu
     fi
 }
 
+# 只负责等用户按下 Enter，不在这里递归调用 show_menu——所有跟这个函数
+# 一样"跑完一个动作要回到主菜单"的地方，最终都是靠脚本最外层的 while
+# 循环重新显示菜单，不是靠函数互相递归。长时间使用同一个交互会话、反复
+# 在菜单间跳转时，递归调用 show_menu 会让 bash 的函数调用栈越叠越深、
+# 永远不会收回来，用久了可能把 shell 的调用栈撑爆，看起来就像脚本无缘
+# 无故直接退出
 before_show_menu() {
     echo && echo -n -e "${yellow}按回车返回主菜单: ${plain}" && read temp
-    show_menu
 }
 
 install() {
@@ -242,9 +245,6 @@ config() {
 uninstall() {
     confirm "确定要卸载 v2node 吗（会连同所有实例一起移除）?" "n"
     if [[ $? != 0 ]]; then
-        if [[ $# == 0 ]]; then
-            show_menu
-        fi
         return 0
     fi
     local d name
@@ -691,7 +691,7 @@ instance_submenu() {
  "
     read -rp "请输入选择 [0-${max}]: " iop
     case "$iop" in
-        0) show_menu; return ;;
+        0) return ;;
         1) start "$name" 0 ;;
         2) stop "$name" 0 ;;
         3) restart "$name" 0 ;;
@@ -1028,5 +1028,10 @@ if [[ $# > 0 ]]; then
         *) show_usage
     esac
 else
-    show_menu
+    # 交互模式靠这个外层循环反复重新显示主菜单，show_menu/before_show_menu/
+    # instance_submenu 彼此之间不会再递归调用对方，调用栈不会随着使用时长
+    # 无限变深
+    while true; do
+        show_menu
+    done
 fi

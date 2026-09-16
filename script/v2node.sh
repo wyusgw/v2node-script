@@ -112,6 +112,15 @@ instance_init_name() {
     fi
 }
 
+# 统一给日志/提示用的名字：默认实例就叫"v2node"，命名实例叫"实例 [name]"
+instance_label() {
+    if [[ -z "$1" ]]; then
+        echo "v2node"
+    else
+        echo "实例 [$1]"
+    fi
+}
+
 confirm() {
     if [[ $# > 1 ]]; then
         echo && read -rp "$1 [默认$2]: " temp
@@ -148,7 +157,7 @@ install() {
         if [[ $# == 0 ]]; then
             start
         else
-            start 0
+            start "" 0
         fi
     fi
 }
@@ -170,45 +179,75 @@ update() {
     fi
 }
 
+# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 config() {
-    echo "v2node在修改配置后会自动尝试重启"
-    vi /etc/v2node/config.json
+    local name="$1"
+    local silent="$2"
+    local cfg=$(instance_config_path "$name")
+    if [[ ! -f "$cfg" ]]; then
+        echo -e "${red}$(instance_label "$name") 还没有配置文件${plain}"
+        [[ -n "$name" ]] && echo -e "${yellow}请先执行: v2node new ${name}${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
+    fi
+    echo "修改配置后会自动尝试重启$(instance_label "$name")"
+    vi "$cfg"
     sleep 2
-    restart
-    check_status
+    restart "$name" 0
+    check_status "$name"
     case $? in
         0)
-            echo -e "v2node状态: ${green}已运行${plain}"
+            echo -e "$(instance_label "$name")状态: ${green}已运行${plain}"
             ;;
         1)
-            echo -e "检测到您未启动v2node或v2node自动重启失败，是否查看日志？[Y/n]" && echo
+            echo -e "检测到$(instance_label "$name")未启动或自动重启失败，是否查看日志？[Y/n]" && echo
             read -e -rp "(默认: y):" yn
             [[ -z ${yn} ]] && yn="y"
             if [[ ${yn} == [Yy] ]]; then
-               show_log
+               log "$name" "" 0
             fi
             ;;
         2)
-            echo -e "v2node状态: ${red}未安装${plain}"
+            echo -e "$(instance_label "$name")状态: ${red}未安装${plain}"
     esac
+    if [[ -z "$silent" ]]; then
+        before_show_menu
+    fi
 }
 
+# 完全卸载：连同所有命名实例一起停用/移除，不留下孤儿 service
 uninstall() {
-    confirm "确定要卸载 v2node 吗?" "n"
+    confirm "确定要卸载 v2node 吗（会连同所有实例一起移除）?" "n"
     if [[ $? != 0 ]]; then
         if [[ $# == 0 ]]; then
             show_menu
         fi
         return 0
     fi
+    local d name
+    if [[ -d /etc/v2node/instances ]]; then
+        for d in /etc/v2node/instances/*/; do
+            [[ -e "$d" ]] || continue
+            name=$(basename "$d")
+            if [[ x"${release}" == x"alpine" ]]; then
+                service $(instance_init_name "$name") stop 2>/dev/null
+                rc-update del $(instance_init_name "$name") 2>/dev/null
+            else
+                systemctl stop "$(instance_service_name "$name")" 2>/dev/null
+                systemctl disable "$(instance_service_name "$name")" 2>/dev/null
+            fi
+        done
+    fi
     if [[ x"${release}" == x"alpine" ]]; then
         service v2node stop
         rc-update del v2node
         rm /etc/init.d/v2node -f
+        rm /etc/init.d/v2node.* -f 2>/dev/null
     else
         systemctl stop v2node
         systemctl disable v2node
         rm /etc/systemd/system/v2node.service -f
+        rm /etc/systemd/system/v2node@.service -f
         systemctl daemon-reload
         systemctl reset-failed
     fi
@@ -224,126 +263,154 @@ uninstall() {
     fi
 }
 
+# 以下生命周期指令统一格式: FUNC [实例名] [silent]
+# 实例名留空 = 默认实例(v2node.service / /etc/v2node/config.json)
+# silent 非空时不会在结尾进交互菜单，供 CLI 直接调用；菜单调用时留空即可
+
 start() {
-    check_status
-    if [[ $? == 0 ]]; then
+    local name="$1"
+    local silent="$2"
+    check_status "$name"
+    local st=$?
+    if [[ $st == 2 ]]; then
+        echo -e "${red}$(instance_label "$name") 还没有安装或配置${plain}"
+    elif [[ $st == 0 ]]; then
         echo ""
-        echo -e "${green}v2node已运行，无需再次启动，如需重启请选择重启${plain}"
+        echo -e "${green}$(instance_label "$name") 已运行，无需再次启动，如需重启请选择重启${plain}"
     else
         if [[ x"${release}" == x"alpine" ]]; then
-            service v2node start
+            service $(instance_init_name "$name") start
         else
-            systemctl start v2node
+            systemctl start "$(instance_service_name "$name")"
         fi
         sleep 2
-        check_status
+        check_status "$name"
         if [[ $? == 0 ]]; then
-            echo -e "${green}v2node 启动成功，请使用 v2node log 查看运行日志${plain}"
+            echo -e "${green}$(instance_label "$name") 启动成功，请使用 v2node log${name:+ $name} 查看运行日志${plain}"
         else
-            echo -e "${red}v2node可能启动失败，请稍后使用 v2node log 查看日志信息${plain}"
+            echo -e "${red}$(instance_label "$name") 可能启动失败，请稍后使用 v2node log${name:+ $name} 查看日志信息${plain}"
         fi
     fi
 
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 stop() {
+    local name="$1"
+    local silent="$2"
     if [[ x"${release}" == x"alpine" ]]; then
-        service v2node stop
+        service $(instance_init_name "$name") stop
     else
-        systemctl stop v2node
+        systemctl stop "$(instance_service_name "$name")"
     fi
     sleep 2
-    check_status
+    check_status "$name"
     if [[ $? == 1 ]]; then
-        echo -e "${green}v2node 停止成功${plain}"
+        echo -e "${green}$(instance_label "$name") 停止成功${plain}"
     else
-        echo -e "${red}v2node停止失败，可能是因为停止时间超过了两秒，请稍后查看日志信息${plain}"
+        echo -e "${red}$(instance_label "$name") 停止失败，可能是因为停止时间超过了两秒，请稍后查看日志信息${plain}"
     fi
 
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 restart() {
+    local name="$1"
+    local silent="$2"
     if [[ x"${release}" == x"alpine" ]]; then
-        service v2node restart
+        service $(instance_init_name "$name") restart
     else
-        systemctl restart v2node
+        systemctl restart "$(instance_service_name "$name")"
     fi
     sleep 2
-    check_status
+    check_status "$name"
     if [[ $? == 0 ]]; then
-        echo -e "${green}v2node 重启成功，请使用 v2node log 查看运行日志${plain}"
+        echo -e "${green}$(instance_label "$name") 重启成功，请使用 v2node log${name:+ $name} 查看运行日志${plain}"
     else
-        echo -e "${red}v2node可能启动失败，请稍后使用 v2node log 查看日志信息${plain}"
+        echo -e "${red}$(instance_label "$name") 可能启动失败，请稍后使用 v2node log${name:+ $name} 查看日志信息${plain}"
     fi
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 status() {
+    local name="$1"
+    local silent="$2"
     if [[ x"${release}" == x"alpine" ]]; then
-        service v2node status
+        service $(instance_init_name "$name") status
     else
-        systemctl status v2node --no-pager -l
+        systemctl status "$(instance_service_name "$name")" --no-pager -l
     fi
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 enable() {
+    local name="$1"
+    local silent="$2"
     if [[ x"${release}" == x"alpine" ]]; then
-        rc-update add v2node
+        rc-update add $(instance_init_name "$name")
     else
-        systemctl enable v2node
+        systemctl enable "$(instance_service_name "$name")"
     fi
     if [[ $? == 0 ]]; then
-        echo -e "${green}v2node 设置开机自启成功${plain}"
+        echo -e "${green}$(instance_label "$name") 设置开机自启成功${plain}"
     else
-        echo -e "${red}v2node 设置开机自启失败${plain}"
+        echo -e "${red}$(instance_label "$name") 设置开机自启失败${plain}"
     fi
 
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 disable() {
+    local name="$1"
+    local silent="$2"
     if [[ x"${release}" == x"alpine" ]]; then
-        rc-update del v2node
+        rc-update del $(instance_init_name "$name")
     else
-        systemctl disable v2node
+        systemctl disable "$(instance_service_name "$name")"
     fi
     if [[ $? == 0 ]]; then
-        echo -e "${green}v2node 取消开机自启成功${plain}"
+        echo -e "${green}$(instance_label "$name") 取消开机自启成功${plain}"
     else
-        echo -e "${red}v2node 取消开机自启失败${plain}"
+        echo -e "${red}$(instance_label "$name") 取消开机自启失败${plain}"
     fi
 
-    if [[ $# == 0 ]]; then
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
-show_log() {
+# $1: 实例名  $2: follow(非空则用 -f 持续跟随，否则只看最后1000行)  $3: silent
+log() {
+    local name="$1"
+    local follow="$2"
+    local silent="$3"
     if [[ x"${release}" == x"alpine" ]]; then
-        echo -e "${red}alpine系统暂不支持日志查看${plain}\n" && exit 1
-    else
-        journalctl -u v2node.service -e --no-pager -f
+        echo -e "${red}alpine系统暂不支持日志查看${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
     fi
-    if [[ $# == 0 ]]; then
+    if [[ -n "$follow" ]]; then
+        journalctl -u "$(instance_service_name "$name").service" -e --no-pager -f
+    else
+        journalctl -u "$(instance_service_name "$name").service" -n 1000 --no-pager
+    fi
+    if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
 update_shell() {
-    wget -O /usr/bin/v2node -N --no-check-certificate https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh
+    wget -O /usr/bin/v2node -N --no-check-certificate https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/v2node.sh
     if [[ $? != 0 ]]; then
         echo ""
         echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"
@@ -386,20 +453,24 @@ check_status() {
     fi
 }
 
+# $1 (可选): 实例名，省略时查默认实例
 check_enabled() {
+    local instance="$1"
     if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(rc-update show | grep v2node)
-        if [[ x"${temp}" == x"" ]]; then
+        local init=$(instance_init_name "$instance")
+        temp=$(rc-update show 2>/dev/null | grep -E "^[[:space:]]*${init}[[:space:]]*\|")
+        if [[ -z "$temp" ]]; then
             return 1
         else
             return 0
         fi
     else
-        temp=$(systemctl is-enabled v2node)
+        local svc=$(instance_service_name "$instance")
+        temp=$(systemctl is-enabled "${svc}" 2>/dev/null)
         if [[ x"${temp}" == x"enabled" ]]; then
             return 0
         else
-            return 1;
+            return 1
         fi
     fi
 }
@@ -432,22 +503,58 @@ check_install() {
     fi
 }
 
-instance_list() {
+# 列出默认实例 + 所有命名实例及各自状态（v2node list）
+list() {
     echo "已知实例:"
     if [[ -f /etc/v2node/config.json ]]; then
-        echo "  default  (/etc/v2node/config.json, v2node.service)"
+        check_status ""
+        case $? in
+            0) echo -e "  default  (v2node.service): ${green}已运行${plain}" ;;
+            1) echo -e "  default  (v2node.service): ${yellow}未运行${plain}" ;;
+            *) echo -e "  default  (v2node.service): ${red}未知${plain}" ;;
+        esac
     fi
     local d name
     if [[ -d /etc/v2node/instances ]]; then
         for d in /etc/v2node/instances/*/; do
             [[ -e "$d" ]] || continue
             name=$(basename "$d")
-            echo "  ${name}  (${d}config.json, v2node@${name}.service)"
+            check_status "$name"
+            case $? in
+                0) echo -e "  ${name}  (v2node@${name}.service): ${green}已运行${plain}" ;;
+                1) echo -e "  ${name}  (v2node@${name}.service): ${yellow}未运行${plain}" ;;
+                *) echo -e "  ${name}  (v2node@${name}.service): ${red}未知${plain}" ;;
+            esac
         done
     fi
 }
 
-instance_add() {
+# 在主菜单里列出命名实例（/etc/v2node/instances/ 下每个文件夹算一个）和各自
+# 的运行状态，不用再进多实例子菜单才能看到；默认实例已经由 show_status 显示过
+show_instances_status() {
+    local d name has_any=0
+    if [[ -d /etc/v2node/instances ]]; then
+        for d in /etc/v2node/instances/*/; do
+            [[ -e "$d" ]] || continue
+            has_any=1
+            name=$(basename "$d")
+            check_status "$name"
+            case $? in
+                0) echo -e "  实例 [${name}]: ${green}已运行${plain}" ;;
+                1) echo -e "  实例 [${name}]: ${yellow}未运行${plain}" ;;
+                *) echo -e "  实例 [${name}]: ${red}未知${plain}" ;;
+            esac
+        done
+    fi
+    if [[ $has_any == 0 ]]; then
+        echo "  目前没有其他实例（可用菜单里的「管理多实例」新增）"
+    fi
+    echo "————————————————"
+}
+
+# 新建一个命名实例（v2node new <name>），交互式收集面板信息后委托给
+# install.sh --instance 处理（下载/跳过下载共用二进制、写 service、生成配置）
+new() {
     local name="$1"
     if [[ -z "$name" ]]; then
         read -rp "请输入实例名(英文/数字，例如 nodeB): " name
@@ -457,7 +564,7 @@ instance_add() {
         return 1
     fi
     if [[ -f "$(instance_config_path "$name")" ]]; then
-        echo -e "${red}实例 [${name}] 已存在，如需修改配置请用: v2node instance config ${name}${plain}"
+        echo -e "${red}实例 [${name}] 已存在，如需修改配置请用: v2node config ${name}${plain}"
         return 1
     fi
 
@@ -483,213 +590,75 @@ instance_add() {
         --instance "$name" --api-host "$api_host" --node-id "$node_id" --api-key "$api_key" --node-type "$node_type"
 }
 
-instance_remove() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance remove <name>${plain}"
+# 移除一个或多个命名实例（v2node remove <name> [name...]），不影响默认实例
+remove() {
+    if [[ $# == 0 ]]; then
+        echo -e "${red}请指定实例名: v2node remove <name> [name...]${plain}"
         return 1
     fi
-    confirm "确定要移除实例 [${name}] 吗（不影响默认实例和其他实例）?" "n"
-    if [[ $? != 0 ]]; then
-        return 0
+    local name
+    for name in "$@"; do
+        [[ -z "$name" ]] && continue
+        confirm "确定要移除实例 [${name}] 吗（不影响默认实例和其他实例）?" "n"
+        if [[ $? != 0 ]]; then
+            continue
+        fi
+        if [[ x"${release}" == x"alpine" ]]; then
+            service $(instance_init_name "$name") stop 2>/dev/null
+            rc-update del $(instance_init_name "$name") 2>/dev/null
+            rm "/etc/init.d/$(instance_init_name "$name")" -f
+        else
+            systemctl stop "$(instance_service_name "$name")" 2>/dev/null
+            systemctl disable "$(instance_service_name "$name")" 2>/dev/null
+            systemctl reset-failed "$(instance_service_name "$name")" 2>/dev/null
+        fi
+        rm "$(instance_dir "$name")" -rf
+        echo -e "${green}实例 [${name}] 已移除（共用的 v2node 主程序未受影响）${plain}"
+    done
+}
+
+# 重命名一个命名实例（v2node rename <old> <new>），默认实例不支持重命名
+rename() {
+    local old="$1"
+    local new_name="$2"
+    if [[ -z "$old" || -z "$new_name" ]]; then
+        echo -e "${red}用法: v2node rename <old_name> <new_name>${plain}"
+        return 1
     fi
+    if [[ ! -f "$(instance_config_path "$old")" ]]; then
+        echo -e "${red}实例 [${old}] 不存在，或者它是默认实例（默认实例不支持重命名）${plain}"
+        return 1
+    fi
+    if [[ -f "$(instance_config_path "$new_name")" ]]; then
+        echo -e "${red}实例 [${new_name}] 已存在，换一个名字${plain}"
+        return 1
+    fi
+
+    check_enabled "$old"
+    local was_enabled=$?
+
     if [[ x"${release}" == x"alpine" ]]; then
-        service $(instance_init_name "$name") stop 2>/dev/null
-        rc-update del $(instance_init_name "$name") 2>/dev/null
-        rm "/etc/init.d/$(instance_init_name "$name")" -f
+        service $(instance_init_name "$old") stop 2>/dev/null
+        rc-update del $(instance_init_name "$old") 2>/dev/null
+        rm "/etc/init.d/$(instance_init_name "$old")" -f
     else
-        systemctl stop "$(instance_service_name "$name")" 2>/dev/null
-        systemctl disable "$(instance_service_name "$name")" 2>/dev/null
-        systemctl reset-failed "$(instance_service_name "$name")" 2>/dev/null
+        systemctl stop "$(instance_service_name "$old")" 2>/dev/null
+        systemctl disable "$(instance_service_name "$old")" 2>/dev/null
+        systemctl reset-failed "$(instance_service_name "$old")" 2>/dev/null
     fi
-    rm "$(instance_dir "$name")" -rf
-    echo -e "${green}实例 [${name}] 已移除（共用的 v2node 主程序未受影响）${plain}"
-}
 
-instance_start() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance start <name>${plain}"
-        return 1
-    fi
-    check_status "$name"
-    local st=$?
-    if [[ $st == 2 ]]; then
-        echo -e "${red}实例 [${name}] 还没有配置，请先执行: v2node instance add ${name}${plain}"
-        return 1
-    fi
-    if [[ $st == 0 ]]; then
-        echo -e "${green}实例 [${name}] 已在运行，无需再次启动${plain}"
-        return 0
-    fi
+    mv "$(instance_dir "$old")" "$(instance_dir "$new_name")"
+
     if [[ x"${release}" == x"alpine" ]]; then
-        service $(instance_init_name "$name") start
+        ln -sf /etc/init.d/v2node "/etc/init.d/$(instance_init_name "$new_name")"
+        [[ $was_enabled == 0 ]] && rc-update add "$(instance_init_name "$new_name")" default
+        service $(instance_init_name "$new_name") start
     else
-        systemctl start "$(instance_service_name "$name")"
+        [[ $was_enabled == 0 ]] && systemctl enable "$(instance_service_name "$new_name")"
+        systemctl start "$(instance_service_name "$new_name")"
     fi
-    sleep 2
-    check_status "$name"
-    if [[ $? == 0 ]]; then
-        echo -e "${green}实例 [${name}] 启动成功，请使用 v2node instance log ${name} 查看运行日志${plain}"
-    else
-        echo -e "${red}实例 [${name}] 可能启动失败，请使用 v2node instance log ${name} 查看${plain}"
-    fi
-}
 
-instance_stop() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance stop <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        service $(instance_init_name "$name") stop
-    else
-        systemctl stop "$(instance_service_name "$name")"
-    fi
-    sleep 2
-    check_status "$name"
-    if [[ $? == 1 ]]; then
-        echo -e "${green}实例 [${name}] 停止成功${plain}"
-    else
-        echo -e "${red}实例 [${name}] 停止失败，可能是因为停止时间超过了两秒，请稍后查看${plain}"
-    fi
-}
-
-instance_restart() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance restart <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        service $(instance_init_name "$name") restart
-    else
-        systemctl restart "$(instance_service_name "$name")"
-    fi
-    sleep 2
-    check_status "$name"
-    if [[ $? == 0 ]]; then
-        echo -e "${green}实例 [${name}] 重启成功，请使用 v2node instance log ${name} 查看运行日志${plain}"
-    else
-        echo -e "${red}实例 [${name}] 可能启动失败，请使用 v2node instance log ${name} 查看${plain}"
-    fi
-}
-
-instance_status() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance status <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        service $(instance_init_name "$name") status
-    else
-        systemctl status "$(instance_service_name "$name")" --no-pager -l
-    fi
-}
-
-instance_log() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance log <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        echo -e "${red}alpine系统暂不支持日志查看${plain}"
-        return 1
-    fi
-    journalctl -u "$(instance_service_name "$name").service" -e --no-pager -f
-}
-
-instance_enable() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance enable <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update add $(instance_init_name "$name")
-    else
-        systemctl enable "$(instance_service_name "$name")"
-    fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}实例 [${name}] 设置开机自启成功${plain}"
-    else
-        echo -e "${red}实例 [${name}] 设置开机自启失败${plain}"
-    fi
-}
-
-instance_disable() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance disable <name>${plain}"
-        return 1
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update del $(instance_init_name "$name")
-    else
-        systemctl disable "$(instance_service_name "$name")"
-    fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}实例 [${name}] 取消开机自启成功${plain}"
-    else
-        echo -e "${red}实例 [${name}] 取消开机自启失败${plain}"
-    fi
-}
-
-instance_config() {
-    local name="$1"
-    if [[ -z "$name" ]]; then
-        echo -e "${red}请指定实例名: v2node instance config <name>${plain}"
-        return 1
-    fi
-    local cfg=$(instance_config_path "$name")
-    if [[ ! -f "$cfg" ]]; then
-        echo -e "${red}实例 [${name}] 还没有配置文件，请先执行: v2node instance add ${name}${plain}"
-        return 1
-    fi
-    echo "修改配置后会自动尝试重启该实例"
-    vi "$cfg"
-    sleep 2
-    instance_restart "$name"
-}
-
-instance_usage() {
-    echo "v2node instance 子命令 - 管理多实例（在同一台机器再跑一个完全独立的 v2node 进程）"
-    echo "------------------------------------------"
-    echo "v2node instance list             - 列出已有实例"
-    echo "v2node instance add <name>       - 新增一个实例（交互式收集面板信息）"
-    echo "v2node instance remove <name>    - 移除一个实例（不影响其他实例）"
-    echo "v2node instance start <name>     - 启动指定实例"
-    echo "v2node instance stop <name>      - 停止指定实例"
-    echo "v2node instance restart <name>   - 重启指定实例"
-    echo "v2node instance status <name>    - 查看指定实例状态"
-    echo "v2node instance log <name>       - 查看指定实例日志"
-    echo "v2node instance enable <name>    - 设置指定实例开机自启"
-    echo "v2node instance disable <name>   - 取消指定实例开机自启"
-    echo "v2node instance config <name>    - 编辑指定实例配置并重启"
-    echo "------------------------------------------"
-    echo "默认实例（不带实例名）仍然用原本的 v2node start/stop/status/... 等命令管理"
-}
-
-instance_dispatch() {
-    local sub="$1"
-    local name="$2"
-    case "$sub" in
-        list) instance_list ;;
-        add) instance_add "$name" ;;
-        remove) check_install 0 && instance_remove "$name" ;;
-        start) check_install 0 && instance_start "$name" ;;
-        stop) check_install 0 && instance_stop "$name" ;;
-        restart) check_install 0 && instance_restart "$name" ;;
-        status) check_install 0 && instance_status "$name" ;;
-        log) check_install 0 && instance_log "$name" ;;
-        enable) check_install 0 && instance_enable "$name" ;;
-        disable) check_install 0 && instance_disable "$name" ;;
-        config) check_install 0 && instance_config "$name" ;;
-        *) instance_usage ;;
-    esac
+    echo -e "${green}实例 [${old}] 已重命名为 [${new_name}]${plain}"
 }
 
 instance_menu() {
@@ -699,35 +668,37 @@ instance_menu() {
   ${green}1.${plain} 列出已有实例
   ${green}2.${plain} 新增实例
   ${green}3.${plain} 移除实例
-  ${green}4.${plain} 启动实例
-  ${green}5.${plain} 停止实例
-  ${green}6.${plain} 重启实例
-  ${green}7.${plain} 查看实例状态
-  ${green}8.${plain} 查看实例日志
-  ${green}9.${plain} 设置实例开机自启
-  ${green}10.${plain} 取消实例开机自启
-  ${green}11.${plain} 编辑实例配置
-  ${green}12.${plain} 返回主菜单
+  ${green}4.${plain} 重命名实例
+  ${green}5.${plain} 启动实例
+  ${green}6.${plain} 停止实例
+  ${green}7.${plain} 重启实例
+  ${green}8.${plain} 查看实例状态
+  ${green}9.${plain} 查看实例日志
+  ${green}10.${plain} 设置实例开机自启
+  ${green}11.${plain} 取消实例开机自启
+  ${green}12.${plain} 编辑实例配置
+  ${green}13.${plain} 返回主菜单
  "
-    read -rp "请输入选择 [1-12]: " iop
-    local iname=""
-    if [[ "$iop" != "1" && "$iop" != "12" ]]; then
+    read -rp "请输入选择 [1-13]: " iop
+    local iname="" iname2=""
+    if [[ "$iop" != "1" && "$iop" != "2" && "$iop" != "3" && "$iop" != "13" ]]; then
         read -rp "实例名: " iname
     fi
     case "$iop" in
-        1) instance_list ;;
-        2) instance_add "$iname" ;;
-        3) instance_remove "$iname" ;;
-        4) instance_start "$iname" ;;
-        5) instance_stop "$iname" ;;
-        6) instance_restart "$iname" ;;
-        7) instance_status "$iname" ;;
-        8) instance_log "$iname" ;;
-        9) instance_enable "$iname" ;;
-        10) instance_disable "$iname" ;;
-        11) instance_config "$iname" ;;
-        12) show_menu; return ;;
-        *) echo -e "${red}请输入正确的数字 [1-12]${plain}" ;;
+        1) list ;;
+        2) new "" ;;
+        3) read -rp "要移除的实例名(可空格分隔多个): " iname; remove $iname ;;
+        4) read -rp "新名字: " iname2; rename "$iname" "$iname2" ;;
+        5) start "$iname" 0 ;;
+        6) stop "$iname" 0 ;;
+        7) restart "$iname" 0 ;;
+        8) status "$iname" 0 ;;
+        9) log "$iname" "" 0 ;;
+        10) enable "$iname" 0 ;;
+        11) disable "$iname" 0 ;;
+        12) config "$iname" 0 ;;
+        13) show_menu; return ;;
+        *) echo -e "${red}请输入正确的数字 [1-13]${plain}" ;;
     esac
     before_show_menu
 }
@@ -755,29 +726,6 @@ show_enable_status() {
     else
         echo -e "是否开机自启: ${red}否${plain}"
     fi
-}
-
-# 在主菜单里列出其他实例（/etc/v2node/instances/ 下每个文件夹算一个）和各自
-# 的运行状态，不用再进多实例子菜单才能看到
-show_instances_status() {
-    local d name has_any=0
-    if [[ -d /etc/v2node/instances ]]; then
-        for d in /etc/v2node/instances/*/; do
-            [[ -e "$d" ]] || continue
-            has_any=1
-            name=$(basename "$d")
-            check_status "$name"
-            case $? in
-                0) echo -e "  实例 [${name}]: ${green}已运行${plain}" ;;
-                1) echo -e "  实例 [${name}]: ${yellow}未运行${plain}" ;;
-                *) echo -e "  实例 [${name}]: ${red}未知${plain}" ;;
-            esac
-        done
-    fi
-    if [[ $has_any == 0 ]]; then
-        echo "  目前没有其他实例（可用菜单里的「管理多实例」新增）"
-    fi
-    echo "————————————————"
 }
 
 show_v2node_version() {
@@ -897,22 +845,25 @@ open_ports() {
 show_usage() {
     echo "v2node 管理脚本使用方法: "
     echo "------------------------------------------"
-    echo "v2node              - 显示管理菜单 (功能更多)"
-    echo "v2node start        - 启动 v2node"
-    echo "v2node stop         - 停止 v2node"
-    echo "v2node restart      - 重启 v2node"
-    echo "v2node status       - 查看 v2node 状态"
-    echo "v2node enable       - 设置 v2node 开机自启"
-    echo "v2node disable      - 取消 v2node 开机自启"
-    echo "v2node log          - 查看 v2node 日志"
-    echo "v2node x25519       - 生成 x25519 密钥"
-    echo "v2node generate     - 生成 v2node 配置文件"
-    echo "v2node update       - 更新 v2node"
-    echo "v2node update x.x.x - 安装 v2node 指定版本"
-    echo "v2node install      - 安装 v2node"
-    echo "v2node uninstall    - 卸载 v2node"
-    echo "v2node version      - 查看 v2node 版本"
-    echo "v2node instance     - 管理多实例，运行 v2node instance 查看详细用法"
+    echo "v2node                         - 显示管理菜单 (功能更多)"
+    echo "v2node list                    - 列出已有实例及状态"
+    echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
+    echo "v2node remove <name> [name...] - 移除实例"
+    echo "v2node rename <old> <new>      - 重命名实例"
+    echo "v2node start [name]            - 启动实例（省略实例名=默认实例）"
+    echo "v2node stop [name]             - 停止实例"
+    echo "v2node restart [name]          - 重启实例"
+    echo "v2node status [name]           - 查看实例状态"
+    echo "v2node enable [name]           - 设置实例开机自启"
+    echo "v2node disable [name]          - 取消实例开机自启"
+    echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
+    echo "v2node config [name]           - 编辑实例配置并重启"
+    echo "v2node generate                - 生成默认实例配置文件"
+    echo "v2node update [version]        - 更新 v2node"
+    echo "v2node install                 - 安装 v2node"
+    echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
+    echo "v2node version                 - 查看 v2node 版本"
+    echo "v2node update_shell            - 更新管理脚本"
     echo "------------------------------------------"
 }
 
@@ -956,7 +907,7 @@ show_menu() {
         5) check_install && stop ;;
         6) check_install && restart ;;
         7) check_install && status ;;
-        8) check_install && show_log ;;
+        8) check_install && log ;;
         9) check_install && enable ;;
         10) check_install && disable ;;
         11) check_install && show_v2node_version ;;
@@ -972,21 +923,35 @@ show_menu() {
 
 if [[ $# > 0 ]]; then
     case $1 in
-        "start") check_install 0 && start 0 ;;
-        "stop") check_install 0 && stop 0 ;;
-        "restart") check_install 0 && restart 0 ;;
-        "status") check_install 0 && status 0 ;;
-        "enable") check_install 0 && enable 0 ;;
-        "disable") check_install 0 && disable 0 ;;
-        "log") check_install 0 && show_log 0 ;;
+        "start") check_install 0 && start "$2" 0 ;;
+        "stop") check_install 0 && stop "$2" 0 ;;
+        "restart") check_install 0 && restart "$2" 0 ;;
+        "status") check_install 0 && status "$2" 0 ;;
+        "enable") check_install 0 && enable "$2" 0 ;;
+        "disable") check_install 0 && disable "$2" 0 ;;
+        "log")
+            log_follow=""
+            log_name=""
+            for log_arg in "$2" "$3"; do
+                if [[ "$log_arg" == "-f" ]]; then
+                    log_follow="1"
+                elif [[ -n "$log_arg" ]]; then
+                    log_name="$log_arg"
+                fi
+            done
+            check_install 0 && log "$log_name" "$log_follow" 0
+            ;;
+        "config") check_install 0 && config "$2" 0 ;;
         "update") check_install 0 && update 0 $2 ;;
-        "config") config $* ;;
+        "new") new "$2" ;;
+        "remove") check_install 0 && remove "${@:2}" ;;
+        "rename") check_install 0 && rename "$2" "$3" ;;
+        "list") check_install 0 && list ;;
         "generate") generate_config_file ;;
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
         "version") check_install 0 && show_v2node_version 0 ;;
         "update_shell") update_shell ;;
-        "instance") instance_dispatch "$2" "$3" ;;
         *) show_usage
     esac
 else

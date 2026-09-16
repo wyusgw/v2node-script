@@ -533,21 +533,24 @@ EOF
     echo "------------------------------------------"
     echo -e "管理脚本使用方法: "
     echo "------------------------------------------"
-    echo "v2node              - 显示管理菜单 (功能更多)"
-    echo "v2node start        - 启动 v2node"
-    echo "v2node stop         - 停止 v2node"
-    echo "v2node restart      - 重启 v2node"
-    echo "v2node status       - 查看 v2node 状态"
-    echo "v2node enable       - 设置 v2node 开机自启"
-    echo "v2node disable      - 取消 v2node 开机自启"
-    echo "v2node log          - 查看 v2node 日志"
-    echo "v2node generate     - 生成 v2node 配置文件"
-    echo "v2node update       - 更新 v2node"
-    echo "v2node update x.x.x - 更新 v2node 指定版本"
-    echo "v2node install      - 安装 v2node"
-    echo "v2node uninstall    - 卸载 v2node"
-    echo "v2node version      - 查看 v2node 版本"
-    echo "v2node instance     - 管理多实例（在同一台机器再跑一个独立 v2node 进程）"
+    echo "v2node                         - 显示管理菜单 (功能更多)"
+    echo "v2node list                    - 列出已有实例及状态"
+    echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
+    echo "v2node remove <name> [name...] - 移除实例"
+    echo "v2node rename <old> <new>      - 重命名实例"
+    echo "v2node start [name]            - 启动实例（省略实例名=默认实例）"
+    echo "v2node stop [name]             - 停止实例"
+    echo "v2node restart [name]          - 重启实例"
+    echo "v2node status [name]           - 查看实例状态"
+    echo "v2node enable [name]           - 设置实例开机自启"
+    echo "v2node disable [name]          - 取消实例开机自启"
+    echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
+    echo "v2node config [name]           - 编辑实例配置并重启"
+    echo "v2node generate                - 生成默认实例配置文件"
+    echo "v2node update [version]        - 更新 v2node"
+    echo "v2node install                 - 安装 v2node"
+    echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
+    echo "v2node version                 - 查看 v2node 版本"
     echo "------------------------------------------"
     # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
@@ -577,7 +580,7 @@ EOF
             if [[ -z "$instance" ]]; then
                 echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"
             else
-                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node instance add ${instance}${plain}"
+                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node new ${instance}${plain}"
             fi
         fi
     fi

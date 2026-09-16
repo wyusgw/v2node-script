@@ -964,7 +964,14 @@ show_menu() {
         3) update_shell ;;
         4) new "" ;;
         *)
-            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 5 && num < 5 + ${#menu_instances[@]} )); then
+            # 留空/空白直接算无效输入，不能落进下面的实例名判断——
+            # instance_config_path("") 会解析成默认实例的路径，那个文件
+            # 一定存在，会让空输入被误判成"选中了默认实例"，静默跳进它
+            # 的管理子菜单，而不是提示"请重新输入"
+            if [[ -z "$num" ]]; then
+                echo -e "${red}请输入正确的数字 [0-${max}]，或是一个存在的实例名${plain}"
+                before_show_menu
+            elif [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 5 && num < 5 + ${#menu_instances[@]} )); then
                 check_install && instance_submenu "${menu_instances[$((num - 5))]}"
             elif [[ "$num" == "default" ]] || [[ -f "$(instance_config_path "$num")" ]]; then
                 local picked=""

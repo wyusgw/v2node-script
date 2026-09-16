@@ -8,8 +8,6 @@ plain='\033[0m'
 cur_dir=$(pwd)
 
 SCRIPT_VERSION="1.0.0"
-# 当前主菜单聚焦的实例名，空字符串代表默认实例；在主菜单输入实例名可以切换
-CURRENT_INSTANCE=""
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -144,21 +142,6 @@ instance_display_name() {
     else
         echo "$1"
     fi
-}
-
-# 校验输入的名字是不是一个存在的实例（default 或某个命名实例），是的话把
-# CURRENT_INSTANCE 切过去，供主菜单直接输入实例名来切换焦点
-select_instance() {
-    local name="$1"
-    if [[ "$name" == "default" ]]; then
-        CURRENT_INSTANCE=""
-        return 0
-    fi
-    if [[ -f "$(instance_config_path "$name")" ]]; then
-        CURRENT_INSTANCE="$name"
-        return 0
-    fi
-    return 1
 }
 
 confirm() {
@@ -716,14 +699,14 @@ instance_submenu() {
         9)
             if [[ -n "$name" ]]; then
                 read -rp "新名字: " new_name
-                rename "$name" "$new_name" && CURRENT_INSTANCE="$new_name"
+                rename "$name" "$new_name"
             else
                 echo -e "${red}默认实例不支持重命名${plain}"
             fi
             ;;
         10)
             if [[ -n "$name" ]]; then
-                remove "$name" && CURRENT_INSTANCE=""
+                remove "$name"
             else
                 echo -e "${red}默认实例不支持移除，请用「完全卸载」${plain}"
             fi
@@ -944,11 +927,31 @@ show_menu() {
 ————————————————
   ${green}3.${plain} 更新管理脚本
   ${green}4.${plain} 新增 v2node 实例
-————————————————
-  ${green}5.${plain} 管理实例 [$(instance_display_name "$CURRENT_INSTANCE")]
- "
+————————————————"
+
+    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 5 开始依序编号，
+    # 而不是只有一行、靠输入实例名切换焦点——实例数量本来就不多，直接
+    # 每个都给一个号码更直觉
+    local menu_instances=()
+    if [[ -f /etc/v2node/config.json ]]; then
+        menu_instances+=("")
+    fi
+    local d
+    if [[ -d /etc/v2node/instances ]]; then
+        for d in /etc/v2node/instances/*/; do
+            [[ -e "$d" ]] || continue
+            menu_instances+=("$(basename "$d")")
+        done
+    fi
+    local i num_i=5
+    for i in "${menu_instances[@]}"; do
+        echo -e "  ${green}${num_i}.${plain} 管理实例 [$(instance_display_name "$i")]"
+        num_i=$((num_i + 1))
+    done
+    echo " "
     show_instance_list
-    echo && read -rp "请输入选择 [0-5] 或 [实例名]: " num
+    local max=$((5 + ${#menu_instances[@]} - 1))
+    echo && read -rp "请输入选择 [0-${max}] 或 [实例名]: " num
 
     case "${num}" in
         0) exit ;;
@@ -956,12 +959,15 @@ show_menu() {
         2) check_install && uninstall ;;
         3) update_shell ;;
         4) new "" ;;
-        5) check_install && instance_submenu "$CURRENT_INSTANCE" ;;
         *)
-            if select_instance "$num"; then
-                show_menu
+            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 5 && num < 5 + ${#menu_instances[@]} )); then
+                check_install && instance_submenu "${menu_instances[$((num - 5))]}"
+            elif [[ "$num" == "default" ]] || [[ -f "$(instance_config_path "$num")" ]]; then
+                local picked=""
+                [[ "$num" != "default" ]] && picked="$num"
+                check_install && instance_submenu "$picked"
             else
-                echo -e "${red}请输入正确的数字 [0-5]，或是一个存在的实例名${plain}"
+                echo -e "${red}请输入正确的数字 [0-${max}]，或是一个存在的实例名${plain}"
                 before_show_menu
             fi
             ;;

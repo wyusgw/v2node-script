@@ -41,6 +41,7 @@ API_HOST_ARG=""
 NODE_ID_ARG=""
 NODE_TYPE_ARG=""
 API_KEY_ARG=""
+INSTANCE_ARG=""
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -53,10 +54,15 @@ parse_args() {
                 NODE_TYPE_ARG="$2"; shift 2 ;;
             --api-key)
                 API_KEY_ARG="$2"; shift 2 ;;
+            --instance)
+                INSTANCE_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE]"
+                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE] [--instance NAME]"
                 echo "--node-type 可省略：省略时协议由面板 API 自动判断（对应后台的 v2node 节点类型）"
                 echo "如需固定为某个协议专属表，可指定：vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
+                echo "--instance 可省略：省略时安装/更新默认实例（/etc/v2node/config.json，v2node.service）"
+                echo "如需在同一台机器上再跑一个完全独立的 v2node 进程，指定一个实例名，例如 --instance nodeB"
+                echo "（会生成 /etc/v2node/nodeB.json，用 systemctl 管理 v2node@nodeB.service，不影响默认实例）"
                 exit 0 ;;
             --*)
                 echo "未知参数: $1"; exit 1 ;;
@@ -69,6 +75,45 @@ parse_args() {
                 fi ;;
         esac
     done
+}
+
+# 实例名为空时对应原本的默认实例（/etc/v2node/config.json, v2node.service），
+# 保证没有用到 --instance 的既有用法完全不受影响
+instance_service_name() {
+    if [[ -z "$1" ]]; then
+        echo "v2node"
+    else
+        echo "v2node@$1"
+    fi
+}
+
+instance_config_path() {
+    if [[ -z "$1" ]]; then
+        echo "/etc/v2node/config.json"
+    else
+        echo "/etc/v2node/instances/$1/config.json"
+    fi
+}
+
+# 命名实例各自一个文件夹（/etc/v2node/instances/<name>/），方便直接靠目录
+# 列表枚举有哪些实例；默认实例沿用原本的 /etc/v2node/config.json，不进文件夹
+instance_dir() {
+    if [[ -z "$1" ]]; then
+        echo "/etc/v2node"
+    else
+        echo "/etc/v2node/instances/$1"
+    fi
+}
+
+# alpine openrc 没有 systemd 的 template unit，用「同一个脚本 + 不同文件名的
+# symlink」实现多实例：openrc 会把脚本被调用时的文件名放进 $SVCNAME，脚本本身
+# 再据此推出要读哪个实例的配置文件（见 install_v2node 里写入的 /etc/init.d/v2node）
+instance_init_name() {
+    if [[ -z "$1" ]]; then
+        echo "v2node"
+    else
+        echo "v2node.$1"
+    fi
 }
 
 arch=$(uname -m)
@@ -202,19 +247,29 @@ install_base() {
 }
 
 # 0: running, 1: not running, 2: not installed
+# $1 (可选): 实例名，省略时查默认实例
 check_status() {
+    local instance="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
     if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(service v2node status | awk '{print $3}')
+        local init=$(instance_init_name "$instance")
+        if [[ ! -e /etc/init.d/${init} ]]; then
+            return 2
+        fi
+        temp=$(service ${init} status | awk '{print $3}')
         if [[ x"${temp}" == x"started" ]]; then
             return 0
         else
             return 1
         fi
     else
-        temp=$(systemctl status v2node | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+        local svc=$(instance_service_name "$instance")
+        if ! systemctl list-unit-files | grep -q "^${svc}\.service"; then
+            return 2
+        fi
+        temp=$(systemctl status ${svc} | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
         if [[ x"${temp}" == x"running" ]]; then
             return 0
         else
@@ -249,9 +304,12 @@ generate_v2node_config() {
         local node_id="$2"
         local api_key="$3"
         local node_type="${4:-v2node}"
+        local instance="$5"
+        local cfg=$(instance_config_path "$instance")
+        local svc=$(instance_service_name "$instance")
 
-        mkdir -p /etc/v2node >/dev/null 2>&1
-        cat > /etc/v2node/config.json <<EOF
+        mkdir -p "$(instance_dir "$instance")" >/dev/null 2>&1
+        cat > "$cfg" <<EOF
 {
     "Log": {
         "Level": "warning",
@@ -269,14 +327,19 @@ generate_v2node_config() {
     ]
 }
 EOF
-        echo -e "${green}V2node 配置文件生成完成,正在重新启动服务${plain}"
+        # 记住这次用的面板地址/密钥，方便后续加实例时可以直接回车沿用，
+        # 不用每次都重新输入同一个面板的信息
+        echo -n "${api_host}" > /etc/v2node/.last_api_host
+        echo -n "${api_key}" > /etc/v2node/.last_api_key
+
+        echo -e "${green}v2node 配置文件(${cfg})生成完成,正在重新启动服务${plain}"
         if [[ x"${release}" == x"alpine" ]]; then
-            service v2node restart
+            service $(instance_init_name "$instance") restart
         else
-            systemctl restart v2node
+            systemctl restart "${svc}"
         fi
         sleep 2
-        check_status
+        check_status "$instance"
         echo -e ""
         if [[ $? == 0 ]]; then
             echo -e "${green}v2node 重启成功${plain}"
@@ -287,6 +350,17 @@ EOF
 
 install_v2node() {
     local version_param="$1"
+    local instance="$INSTANCE_ARG"
+    local cfg=$(instance_config_path "$instance")
+    local svc=$(instance_service_name "$instance")
+
+    # 加实例时如果主程序已经装好了，就不要重新下载/解压——那会把正在跑的
+    # 默认实例（或其他已存在实例）用的那份二进制文件从脚下抽掉。二进制、
+    # geoip/geosite 是所有实例共用的一份，只有配置和 service 是各实例独立的。
+    if [[ -n "$instance" && -f /usr/local/v2node/v2node ]]; then
+        echo -e "${green}检测到 v2node 主程序已安装，跳过重新下载，仅为实例 [${instance}] 配置服务${plain}"
+        last_version=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $NF}')
+    else
     if [[ -e /usr/local/v2node/ ]]; then
         rm -rf /usr/local/v2node/
     fi
@@ -323,6 +397,11 @@ install_v2node() {
     mkdir /etc/v2node/ -p
     cp geoip.dat /etc/v2node/
     cp geosite.dat /etc/v2node/
+    fi
+
+    # service/init 脚本对所有实例都是共用同一份定义（systemd 的 template unit
+    # 用 %i 代入实例名；openrc 用同一个脚本 + $SVCNAME 判断自己是哪个实例），
+    # 每次都幂等地重写一遍，不管这次是不是为了加实例
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/v2node -f
         cat <<EOF > /etc/init.d/v2node
@@ -331,11 +410,18 @@ install_v2node() {
 name="v2node"
 description="v2node"
 
+: \${SVCNAME:=v2node}
+if [ "\$SVCNAME" = "v2node" ]; then
+    v2node_cfg="/etc/v2node/config.json"
+else
+    v2node_cfg="/etc/v2node/\${SVCNAME#v2node.}.json"
+fi
+
 command="/usr/local/v2node/v2node"
-command_args="server"
+command_args="server -c \${v2node_cfg}"
 command_user="root"
 
-pidfile="/run/v2node.pid"
+pidfile="/run/\${SVCNAME}.pid"
 command_background="yes"
 
 depend() {
@@ -343,11 +429,18 @@ depend() {
 }
 EOF
         chmod +x /etc/init.d/v2node
-        rc-update add v2node default
+        if [[ -z "$instance" ]]; then
+            rc-update add v2node default
+        else
+            # openrc 靠脚本文件名认实例，做一个指到同一份脚本的 symlink
+            ln -sf /etc/init.d/v2node "/etc/init.d/$(instance_init_name "$instance")"
+            rc-update add "$(instance_init_name "$instance")" default
+        fi
         echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
     else
-        rm /etc/systemd/system/v2node.service -f
-        cat <<EOF > /etc/systemd/system/v2node.service
+        if [[ -z "$instance" ]]; then
+            rm /etc/systemd/system/v2node.service -f
+            cat <<EOF > /etc/systemd/system/v2node.service
 [Unit]
 Description=v2node Service
 After=network.target nss-lookup.target
@@ -369,29 +462,59 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+        fi
+        # 命名实例走 template unit（v2node@.service，%i 是实例名），一直存在、
+        # 幂等重写，不影响默认实例已经在用的 v2node.service
+        rm /etc/systemd/system/v2node@.service -f
+        cat <<EOF > /etc/systemd/system/v2node@.service
+[Unit]
+Description=v2node Service (%i)
+After=network.target nss-lookup.target
+Wants=network.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+LimitAS=infinity
+LimitRSS=infinity
+LimitCORE=infinity
+LimitNOFILE=999999
+WorkingDirectory=/usr/local/v2node/
+ExecStart=/usr/local/v2node/v2node server -c /etc/v2node/%i.json
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
         systemctl daemon-reload
-        systemctl stop v2node
-        systemctl enable v2node
+        if [[ -z "$instance" ]]; then
+            systemctl stop v2node
+            systemctl enable v2node
+        else
+            systemctl enable "${svc}"
+        fi
         echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
     fi
 
-    if [[ ! -f /etc/v2node/config.json ]]; then
+    if [[ ! -f "$cfg" ]]; then
         # 如果通过 CLI 传入了完整参数，则直接生成配置并跳过交互
         if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
-            generate_v2node_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG" "$NODE_TYPE_ARG"
-            echo -e "${green}已根据参数生成 /etc/v2node/config.json${plain}"
+            generate_v2node_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG" "$NODE_TYPE_ARG" "$instance"
+            echo -e "${green}已根据参数生成 ${cfg}${plain}"
             first_install=false
         else
             first_install=true
         fi
     else
         if [[ x"${release}" == x"alpine" ]]; then
-            service v2node start
+            service $(instance_init_name "$instance") start
         else
-            systemctl start v2node
+            systemctl start "${svc}"
         fi
         sleep 2
-        check_status
+        check_status "$instance"
         echo -e ""
         if [[ $? == 0 ]]; then
             echo -e "${green}v2node 重启成功${plain}"
@@ -424,23 +547,38 @@ EOF
     echo "v2node install      - 安装 v2node"
     echo "v2node uninstall    - 卸载 v2node"
     echo "v2node version      - 查看 v2node 版本"
+    echo "v2node instance     - 管理多实例（在同一台机器再跑一个独立 v2node 进程）"
     echo "------------------------------------------"
     # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
     if [[ $first_install == true ]]; then
-        read -rp "检测到你为第一次安装 v2node，是否自动生成 /etc/v2node/config.json？(y/n): " if_generate
+        read -rp "检测到 ${cfg} 还不存在，是否现在生成？(y/n): " if_generate
         if [[ "$if_generate" =~ ^[Yy]$ ]]; then
-            # 交互式收集参数，提供示例默认值
-            read -rp "面板API地址[格式: https://example.com/]: " api_host
-            api_host=${api_host:-https://example.com/}
+            # 交互式收集参数，如果之前配置过其他实例，读上次用过的面板地址/
+            # 密钥当默认值，直接回车即可沿用
+            local last_host="" last_key=""
+            [[ -f /etc/v2node/.last_api_host ]] && last_host=$(cat /etc/v2node/.last_api_host 2>/dev/null)
+            [[ -f /etc/v2node/.last_api_key ]] && last_key=$(cat /etc/v2node/.last_api_key 2>/dev/null)
+
+            read -rp "面板API地址[格式: https://example.com/]${last_host:+ [默认: $last_host]}: " api_host
+            api_host=${api_host:-${last_host:-https://example.com/}}
             read -rp "节点ID: " node_id
             node_id=${node_id:-1}
-            read -rp "节点通讯密钥: " api_key
+            if [[ -n "$last_key" ]]; then
+                read -rp "节点通讯密钥 [默认: ${last_key}]: " api_key
+                api_key=${api_key:-$last_key}
+            else
+                read -rp "节点通讯密钥: " api_key
+            fi
             node_type=$(choose_node_type)
 
-            generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type"
+            generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type" "$instance"
         else
-            echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"
+            if [[ -z "$instance" ]]; then
+                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"
+            else
+                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node instance add ${instance}${plain}"
+            fi
         fi
     fi
 }

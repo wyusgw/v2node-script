@@ -34,3 +34,16 @@ v2node config [name]           # 编辑实例配置并自动重启
 ```
 
 也可以运行 `v2node`（不带参数）进入交互菜单，选择「管理多实例」。
+
+## 安装分支
+
+默认走稳定版（GitHub Releases 里的正式版本）。也可以切换到测试版：测试版是 v2node 仓库 `dev` 分支的滚动构建（每次 push 到 `dev` 都会重新构建，固定用 `beta` 这个 tag 覆盖发布），可能不稳定，仅建议测试环境使用。
+
+```
+v2node channel            # 查看当前分支
+v2node channel stable     # 切换回稳定版
+v2node channel beta       # 切换到测试版
+v2node update             # 按当前分支重新安装/更新
+```
+
+交互菜单里对应「切换安装分支」这一项。install.sh 也支持 `--channel stable|beta` 参数，省略时沿用上次选择（首次默认 stable）。

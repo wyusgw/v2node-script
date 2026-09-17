@@ -144,6 +144,25 @@ instance_display_name() {
     fi
 }
 
+# 安装分支跟 install.sh 共用同一个文件，两边各自读，不互相调用
+CHANNEL_FILE="/etc/v2node/.channel"
+
+get_channel() {
+    if [[ -f "$CHANNEL_FILE" ]]; then
+        cat "$CHANNEL_FILE"
+    else
+        echo "stable"
+    fi
+}
+
+channel_label() {
+    if [[ "$(get_channel)" == "beta" ]]; then
+        echo "测试版"
+    else
+        echo "稳定版"
+    fi
+}
+
 confirm() {
     if [[ $# > 1 ]]; then
         echo && read -rp "$1 [默认$2]: " temp
@@ -203,6 +222,40 @@ update() {
     if [[ $# == 0 ]]; then
         before_show_menu
     fi
+}
+
+# $1: silent(非空=不返回主菜单，供CLI用)
+switch_channel() {
+    local silent="$1"
+    local cur target target_label
+    cur=$(get_channel)
+    target="beta"
+    target_label="测试版"
+    if [[ "$cur" == "beta" ]]; then
+        target="stable"
+        target_label="稳定版"
+    fi
+    echo -e "当前安装分支: $(channel_label)"
+    if [[ "$target" == "beta" ]]; then
+        echo -e "${yellow}测试版是 dev 分支的滚动构建，可能不稳定，仅建议在测试环境使用${plain}"
+    fi
+    confirm "确定要切换到${target_label}吗" "n"
+    if [[ $? != 0 ]]; then
+        [[ -z "$silent" ]] && before_show_menu
+        return 0
+    fi
+    mkdir -p /etc/v2node
+    echo "$target" > "$CHANNEL_FILE"
+    echo -e "${green}已切换到${target_label}${plain}，下次安装/更新会使用这个分支"
+    if [[ ! -f /usr/local/v2node/v2node ]]; then
+        [[ -z "$silent" ]] && before_show_menu
+        return 0
+    fi
+    confirm "是否立即按新分支重新安装/更新 v2node" "y"
+    if [[ $? == 0 ]]; then
+        update 0 ""
+    fi
+    [[ -z "$silent" ]] && before_show_menu
 }
 
 # $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
@@ -727,14 +780,19 @@ show_version_header() {
         installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
     fi
     if [[ -n "$installed" ]]; then
-        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]"
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
-        latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ "$(get_channel)" == "beta" ]]; then
+            latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/git/refs/tags/beta" 2>/dev/null | grep '"sha":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c1-7)
+            [[ -n "$latest" ]] && latest="beta-${latest}"
+        else
+            latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        fi
         if [[ -n "$latest" && "$latest" != "$installed" ]]; then
             echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
         fi
     else
-        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]"
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]  [分支: $(channel_label)]"
     fi
 }
 
@@ -917,6 +975,7 @@ show_usage() {
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看 v2node 版本"
+    echo "v2node channel [stable|beta]   - 查看/切换安装分支（不带参数=查看当前分支）"
     echo "v2node update_shell            - 更新管理脚本"
     echo "----------------------------------------------------------"
 }
@@ -930,10 +989,11 @@ show_menu() {
   ${green}2.${plain} 完全卸载 v2node
 ————————————————
   ${green}3.${plain} 更新管理脚本
-  ${green}4.${plain} 新增 v2node 实例
+  ${green}4.${plain} 切换安装分支 [当前: $(channel_label)]
+  ${green}5.${plain} 新增 v2node 实例
 ————————————————"
 
-    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 5 开始依序编号，
+    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 6 开始依序编号，
     # 而不是只有一行、靠输入实例名切换焦点——实例数量本来就不多，直接
     # 每个都给一个号码更直觉
     local menu_instances=()
@@ -947,14 +1007,14 @@ show_menu() {
             menu_instances+=("$(basename "$d")")
         done
     fi
-    local i num_i=5
+    local i num_i=6
     for i in "${menu_instances[@]}"; do
         echo -e "  ${green}${num_i}.${plain} 管理实例 [$(instance_display_name "$i")]"
         num_i=$((num_i + 1))
     done
     echo " "
     show_instance_list
-    local max=$((5 + ${#menu_instances[@]} - 1))
+    local max=$((6 + ${#menu_instances[@]} - 1))
     echo && read -rp "请输入选择 [0-${max}] 或 [实例名]: " num
 
     case "${num}" in
@@ -962,10 +1022,11 @@ show_menu() {
         1) install_or_update ;;
         2) check_install && uninstall ;;
         3) update_shell ;;
-        4) new "" ;;
+        4) switch_channel ;;
+        5) new "" ;;
         *)
-            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 5 && num < 5 + ${#menu_instances[@]} )); then
-                check_install && instance_submenu "${menu_instances[$((num - 5))]}"
+            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 6 && num < 6 + ${#menu_instances[@]} )); then
+                check_install && instance_submenu "${menu_instances[$((num - 6))]}"
             elif [[ "$num" == "default" ]] || [[ -f "$(instance_config_path "$num")" ]]; then
                 local picked=""
                 [[ "$num" != "default" ]] && picked="$num"
@@ -1018,6 +1079,17 @@ if [[ $# > 0 ]]; then
         "uninstall") check_install 0 && uninstall 0 ;;
         "version") check_install 0 && show_v2node_version 0 ;;
         "update_shell") update_shell ;;
+        "channel")
+            if [[ -z "$2" ]]; then
+                echo "当前安装分支: $(channel_label)"
+            elif [[ "$2" == "stable" || "$2" == "beta" ]]; then
+                mkdir -p /etc/v2node
+                echo "$2" > "$CHANNEL_FILE"
+                echo -e "${green}已切换到$(channel_label)${plain}，下次安装/更新会使用这个分支，执行 v2node update 立即生效"
+            else
+                echo -e "${red}未知分支: $2，只能是 stable 或 beta${plain}"
+            fi
+            ;;
         *) show_usage
     esac
 else

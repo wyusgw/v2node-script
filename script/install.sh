@@ -56,13 +56,17 @@ parse_args() {
                 API_KEY_ARG="$2"; shift 2 ;;
             --instance)
                 INSTANCE_ARG="$2"; shift 2 ;;
+            --channel)
+                CHANNEL_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE] [--instance NAME]"
+                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE] [--instance NAME] [--channel stable|beta]"
                 echo "--node-type 可省略：省略时协议由面板 API 自动判断（对应后台的 v2node 节点类型）"
                 echo "如需固定为某个协议专属表，可指定：vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
                 echo "--instance 可省略：省略时安装/更新默认实例（/etc/v2node/config.json，v2node.service）"
                 echo "如需在同一台机器上再跑一个完全独立的 v2node 进程，指定一个实例名，例如 --instance nodeB"
                 echo "（会生成 /etc/v2node/nodeB.json，用 systemctl 管理 v2node@nodeB.service，不影响默认实例）"
+                echo "--channel 可省略：省略时沿用上次选择的安装分支（首次默认 stable）"
+                echo "stable = 正式发布版（releases/latest）；beta = dev 分支滚动构建的测试版，可能不稳定"
                 exit 0 ;;
             --*)
                 echo "未知参数: $1"; exit 1 ;;
@@ -87,6 +91,19 @@ is_cmd_exist() {
         return 0
     fi
     return 2
+}
+
+# 安装分支：stable=正式发布版（releases/latest），beta=dev 分支滚动构建的测试版。
+# 所有实例共用同一个分支设置（跟主程序共用一样，不分实例），记录在这个文件里，
+# 下次 install/update 不带 --channel 时就沿用它，不用每次都重新选
+CHANNEL_FILE="/etc/v2node/.channel"
+
+get_channel() {
+    if [[ -f "$CHANNEL_FILE" ]]; then
+        cat "$CHANNEL_FILE"
+    else
+        echo "stable"
+    fi
 }
 
 # 实例名为空时对应原本的默认实例（/etc/v2node/config.json, v2node.service），
@@ -369,6 +386,16 @@ install_v2node() {
     local cfg=$(instance_config_path "$instance")
     local svc=$(instance_service_name "$instance")
 
+    local channel="${CHANNEL_ARG:-$(get_channel)}"
+    if [[ "$channel" != "stable" && "$channel" != "beta" ]]; then
+        echo -e "${red}未知安装分支: ${channel}，只能是 stable 或 beta${plain}"
+        exit 1
+    fi
+    if [[ -n "$CHANNEL_ARG" ]]; then
+        mkdir -p /etc/v2node
+        echo "$channel" > "$CHANNEL_FILE"
+    fi
+
     # 加实例时如果主程序已经装好了，就不要重新下载/解压——那会把正在跑的
     # 默认实例（或其他已存在实例）用的那份二进制文件从脚下抽掉。二进制、
     # geoip/geosite 是所有实例共用的一份，只有配置和 service 是各实例独立的。
@@ -383,7 +410,16 @@ install_v2node() {
     mkdir /usr/local/v2node/ -p
     cd /usr/local/v2node/
 
-    if  [[ -z "$version_param" ]] ; then
+    if [[ -z "$version_param" && "$channel" == "beta" ]]; then
+        echo -e "${yellow}当前安装分支: 测试版（dev 分支滚动构建，可能不稳定）${plain}"
+        last_version="beta"
+        url="https://github.com/wyusgw/v2node/releases/download/beta/v2node-linux-${arch}.zip"
+        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}下载 v2node 测试版失败，请确保你的服务器能够下载 Github 的文件，或者 dev 分支还没有构建产物${plain}"
+            exit 1
+        fi
+    elif  [[ -z "$version_param" ]] ; then
         last_version=$(curl -Ls "https://api.github.com/repos/wyusgw/v2node/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
             echo -e "${red}检测 v2node 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 v2node 版本安装${plain}"

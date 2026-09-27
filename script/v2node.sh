@@ -822,15 +822,17 @@ show_instance_list() {
     echo ""
     echo "  实例列表:"
     local status_text enable_text
-    check_status ""
-    case $? in
-        0) status_text="${green}已运行${plain}" ;;
-        1) status_text="${yellow}未运行${plain}" ;;
-        *) status_text="${red}未安装${plain}" ;;
-    esac
-    check_enabled ""
-    if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
-    printf "    %-12s [%b] [自启: %b]  %s\n" "default" "$status_text" "$enable_text" "/etc/v2node/config.json"
+    if [[ -f /etc/v2node/config.json ]]; then
+        check_status ""
+        case $? in
+            0) status_text="${green}已运行${plain}" ;;
+            1) status_text="${yellow}未运行${plain}" ;;
+            *) status_text="${red}未安装${plain}" ;;
+        esac
+        check_enabled ""
+        if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
+        printf "    %-12s [%b] [自启: %b]  %s\n" "default" "$status_text" "$enable_text" "/etc/v2node/config.json"
+    fi
 
     local d name
     if [[ -d /etc/v2node/instances ]]; then

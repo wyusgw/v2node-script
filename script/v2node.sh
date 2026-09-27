@@ -566,12 +566,32 @@ check_uninstall() {
     fi
 }
 
+# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 check_install() {
-    check_status
+    local instance="$1"
+    local silent="$2"
+    check_status "$instance"
     if [[ $? == 2 ]]; then
         echo ""
+        echo -e "${red}$(instance_label "$instance") 还没有安装或配置${plain}"
+        if [[ -z "$silent" ]]; then
+            before_show_menu
+        fi
+        return 1
+    else
+        return 0
+    fi
+}
+
+# 只检查 v2node 主程序是否已安装，不看任何单个实例的配置，
+# 供 update/version/list/uninstall 这类不针对某个实例的全局命令使用
+# $1: silent(非空=不返回主菜单，供CLI用)
+check_binary_install() {
+    local silent="$1"
+    if [[ ! -f /usr/local/v2node/v2node ]]; then
+        echo ""
         echo -e "${red}请先安装v2node${plain}"
-        if [[ $# == 0 ]]; then
+        if [[ -z "$silent" ]]; then
             before_show_menu
         fi
         return 1
@@ -1020,17 +1040,18 @@ show_menu() {
     case "${num}" in
         0|"") echo -e "${red}请输入选择 [0-${max}]${plain}" && exit ;;
         1) install_or_update ;;
-        2) check_install && uninstall ;;
+        2) check_binary_install && uninstall ;;
         3) update_shell ;;
         4) switch_channel ;;
         5) new "" ;;
         *)
             if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 6 && num < 6 + ${#menu_instances[@]} )); then
-                check_install && instance_submenu "${menu_instances[$((num - 6))]}"
+                local picked="${menu_instances[$((num - 6))]}"
+                check_install "$picked" && instance_submenu "$picked"
             elif [[ "$num" == "default" ]] || [[ -f "$(instance_config_path "$num")" ]]; then
                 local picked=""
                 [[ "$num" != "default" ]] && picked="$num"
-                check_install && instance_submenu "$picked"
+                check_install "$picked" && instance_submenu "$picked"
             else
                 echo -e "${red}请输入正确的数字 [0-${max}]，或是一个存在的实例名${plain}"
                 before_show_menu
@@ -1049,12 +1070,12 @@ fi
 
 if [[ $# > 0 ]]; then
     case $1 in
-        "start") check_install 0 && start "$2" 0 ;;
-        "stop") check_install 0 && stop "$2" 0 ;;
-        "restart") check_install 0 && restart "$2" 0 ;;
-        "status") check_install 0 && status "$2" 0 ;;
-        "enable") check_install 0 && enable "$2" 0 ;;
-        "disable") check_install 0 && disable "$2" 0 ;;
+        "start") check_install "$2" 0 && start "$2" 0 ;;
+        "stop") check_install "$2" 0 && stop "$2" 0 ;;
+        "restart") check_install "$2" 0 && restart "$2" 0 ;;
+        "status") check_install "$2" 0 && status "$2" 0 ;;
+        "enable") check_install "$2" 0 && enable "$2" 0 ;;
+        "disable") check_install "$2" 0 && disable "$2" 0 ;;
         "log")
             log_follow=""
             log_name=""
@@ -1065,19 +1086,19 @@ if [[ $# > 0 ]]; then
                     log_name="$log_arg"
                 fi
             done
-            check_install 0 && log "$log_name" "$log_follow" 0
+            check_install "$log_name" 0 && log "$log_name" "$log_follow" 0
             ;;
-        "config") check_install 0 && config "$2" 0 ;;
-        "update") check_install 0 && update 0 $2 ;;
+        "config") check_install "$2" 0 && config "$2" 0 ;;
+        "update") check_binary_install 0 && update 0 $2 ;;
         "new") new "$2" 0 ;;
-        "remove") check_install 0 && remove "${@:2}" ;;
-        "rename") check_install 0 && rename "$2" "$3" ;;
-        "list") check_install 0 && list ;;
+        "remove") check_install "$2" 0 && remove "${@:2}" ;;
+        "rename") check_install "$2" 0 && rename "$2" "$3" ;;
+        "list") check_binary_install 0 && list ;;
         "generate") generate_config_file ;;
         "open_ports") open_ports ;;
         "install") check_uninstall 0 && install 0 ;;
-        "uninstall") check_install 0 && uninstall 0 ;;
-        "version") check_install 0 && show_v2node_version 0 ;;
+        "uninstall") check_binary_install 0 && uninstall 0 ;;
+        "version") check_binary_install 0 && show_v2node_version 0 ;;
         "update_shell") update_shell ;;
         "channel")
             if [[ -z "$2" ]]; then

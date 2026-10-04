@@ -521,7 +521,9 @@ check_status() {
         fi
     else
         local svc=$(instance_service_name "$instance")
-        temp=$(systemctl status ${svc} 2>/dev/null | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+        # "systemctl status" also reads the journal tail, which is slow on hosts with large
+        # journals and runs for every instance on each menu display; SubState needs no journal
+        temp=$(systemctl show -p SubState "${svc}" 2>/dev/null | cut -d= -f2)
         if [[ x"${temp}" == x"running" ]]; then
             return 0
         else
@@ -793,6 +795,39 @@ instance_submenu() {
     before_show_menu
 }
 
+# Look up the latest version once; only called from the background refresh below,
+# with short timeouts so an unreachable GitHub never holds up anything in the foreground.
+fetch_latest_version() {
+    local latest
+    if [[ "$(get_channel)" == "beta" ]]; then
+        latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/git/refs/tags/beta" 2>/dev/null | grep '"sha":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c1-7)
+        [[ -n "$latest" ]] && latest="beta-${latest}"
+    else
+        latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    echo "$latest"
+}
+
+# The menu header calls this on every display, so it must never wait for the network:
+# print the cached value and refresh it in the background when missing or older than 6 hours
+# (the new value shows up the next time the menu is displayed).
+get_latest_version() {
+    local dir="/run"
+    [[ -d "$dir" && -w "$dir" ]] || dir="/tmp"
+    local cache="${dir}/.v2node_latest_$(get_channel)"
+    if [[ -s "$cache" ]]; then
+        cat "$cache"
+    fi
+    if [[ ! -s "$cache" || -n "$(find "$cache" -mmin +360 2>/dev/null)" ]]; then
+        (
+            latest=$(fetch_latest_version)
+            if [[ -n "$latest" ]]; then
+                echo "$latest" > "${cache}.tmp" && mv -f "${cache}.tmp" "$cache"
+            fi
+        ) >/dev/null 2>&1 &
+    fi
+}
+
 # 主菜单顶部的版本信息行，跟 soga 一样实时查 GitHub 最新版本、有更新就提示
 show_version_header() {
     local installed=""
@@ -802,12 +837,7 @@ show_version_header() {
     if [[ -n "$installed" ]]; then
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
-        if [[ "$(get_channel)" == "beta" ]]; then
-            latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/git/refs/tags/beta" 2>/dev/null | grep '"sha":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c1-7)
-            [[ -n "$latest" ]] && latest="beta-${latest}"
-        else
-            latest=$(curl -Ls --max-time 5 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        fi
+        latest=$(get_latest_version)
         if [[ -n "$latest" && "$latest" != "$installed" ]]; then
             echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
         fi

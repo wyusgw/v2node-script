@@ -215,7 +215,24 @@ update() {
     fi
     bash <(curl -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh) $version
     if [[ $? == 0 ]]; then
-        echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
+        # Only the default instance is restarted by the update; named instances keep running the old
+        # binary until restarted, so list them
+        local named=() d
+        if [[ -d /etc/v2node/instances ]]; then
+            for d in /etc/v2node/instances/*/; do
+                [[ -e "$d" ]] && named+=("$(basename "$d")")
+            done
+        fi
+        if [[ -f /etc/v2node/config.json && ${#named[@]} -eq 0 ]]; then
+            echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
+        elif [[ -f /etc/v2node/config.json ]]; then
+            echo -e "${green}更新完成，已自动重启默认实例，请使用 v2node log [实例名] 查看运行日志（省略实例名即默认实例）${plain}"
+        else
+            echo -e "${green}更新完成，请使用 v2node log <实例名> 查看运行日志${plain}"
+        fi
+        if [[ ${#named[@]} -gt 0 ]]; then
+            echo -e "${yellow}命名实例 [${named[*]}] 需要分别执行 v2node restart <实例名> 才会用上新版本${plain}"
+        fi
         exit
     fi
 

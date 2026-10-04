@@ -376,7 +376,7 @@ EOF
         if [[ $? == 0 ]]; then
             echo -e "${green}v2node 重启成功${plain}"
         else
-            echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
+            echo -e "${red}v2node 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"
         fi
 }
 
@@ -572,7 +572,7 @@ EOF
         if [[ $? == 0 ]]; then
             echo -e "${green}v2node 重启成功${plain}"
         else
-            echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
+            echo -e "${red}v2node 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"
         fi
         first_install=false
     fi

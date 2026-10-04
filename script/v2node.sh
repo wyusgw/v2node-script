@@ -884,8 +884,10 @@ show_instance_list() {
 
 # 安装/更新合并成一个入口：还没装就安装，已经装了就更新，对齐 soga 的「安装/更新」
 install_or_update() {
-    check_status ""
-    if [[ $? == 2 ]]; then
+    # check_status "" only looks at the default instance, so it reports "not installed" whenever
+    # the default instance has no config (e.g. only named instances exist) and would wrongly run a
+    # fresh install, which wipes the shared binary directory
+    if [[ ! -f /usr/local/v2node/v2node ]]; then
         install
     else
         update

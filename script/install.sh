@@ -385,6 +385,8 @@ install_v2node() {
     local instance="$INSTANCE_ARG"
     local cfg=$(instance_config_path "$instance")
     local svc=$(instance_service_name "$instance")
+    local had_binary=false
+    [[ -f /usr/local/v2node/v2node ]] && had_binary=true
 
     local channel="${CHANNEL_ARG:-$(get_channel)}"
     if [[ "$channel" != "stable" && "$channel" != "beta" ]]; then
@@ -604,6 +606,12 @@ EOF
     echo "v2node version                 - 查看 v2node 版本"
     echo "----------------------------------------------------------"
     # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
+
+    # When only named instances exist, an update has no default instance to configure,
+    # so do not ask about generating the default config
+    if [[ $first_install == true && $had_binary == true && -z "$instance" ]] && compgen -G "/etc/v2node/instances/*/config.json" >/dev/null; then
+        first_install=false
+    fi
 
     if [[ $first_install == true ]]; then
         read -rp "检测到 ${cfg} 还不存在，是否现在生成？(y/n): " if_generate

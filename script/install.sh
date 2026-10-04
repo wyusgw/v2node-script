@@ -124,6 +124,28 @@ instance_config_path() {
     fi
 }
 
+# Panel defaults come from the most recently modified existing instance config, so the key is not
+# kept in a second plaintext file. Sets last_host / last_key (empty when there is no config).
+load_panel_defaults() {
+    last_host=""
+    last_key=""
+    local f
+    f=$(ls -t /etc/v2node/config.json /etc/v2node/instances/*/config.json 2>/dev/null | head -1)
+    [[ -n "$f" ]] || return 0
+    last_host=$(sed -n 's/.*"ApiHost"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)
+    last_key=$(sed -n 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)
+}
+
+# Show only the ends of a key in prompts
+mask_key() {
+    local k="$1"
+    if (( ${#k} > 8 )); then
+        echo "${k:0:3}***${k: -3}"
+    else
+        echo "***"
+    fi
+}
+
 # 命名实例各自一个文件夹（/etc/v2node/instances/<name>/），方便直接靠目录
 # 列表枚举有哪些实例；默认实例沿用原本的 /etc/v2node/config.json，不进文件夹
 instance_dir() {
@@ -359,11 +381,6 @@ generate_v2node_config() {
     ]
 }
 EOF
-        # 记住这次用的面板地址/密钥，方便后续加实例时可以直接回车沿用，
-        # 不用每次都重新输入同一个面板的信息
-        echo -n "${api_host}" > /etc/v2node/.last_api_host
-        echo -n "${api_key}" > /etc/v2node/.last_api_key
-
         echo -e "${green}v2node 配置文件(${cfg})生成完成,正在重新启动服务${plain}"
         if [[ x"${release}" == x"alpine" ]]; then
             service $(instance_init_name "$instance") restart
@@ -387,6 +404,8 @@ install_v2node() {
     local svc=$(instance_service_name "$instance")
     local had_binary=false
     [[ -f /usr/local/v2node/v2node ]] && had_binary=true
+    # earlier versions kept a separate plaintext copy of the panel address and key
+    rm -f /etc/v2node/.last_api_host /etc/v2node/.last_api_key
 
     local channel="${CHANNEL_ARG:-$(get_channel)}"
     if [[ "$channel" != "stable" && "$channel" != "beta" ]]; then
@@ -619,15 +638,14 @@ EOF
             # 交互式收集参数，如果之前配置过其他实例，读上次用过的面板地址/
             # 密钥当默认值，直接回车即可沿用
             local last_host="" last_key=""
-            [[ -f /etc/v2node/.last_api_host ]] && last_host=$(cat /etc/v2node/.last_api_host 2>/dev/null)
-            [[ -f /etc/v2node/.last_api_key ]] && last_key=$(cat /etc/v2node/.last_api_key 2>/dev/null)
+            load_panel_defaults
 
             read -rp "面板API地址[格式: https://example.com/]${last_host:+ [默认: $last_host]}: " api_host
             api_host=${api_host:-${last_host:-https://example.com/}}
             read -rp "节点ID: " node_id
             node_id=${node_id:-1}
             if [[ -n "$last_key" ]]; then
-                read -rp "节点通讯密钥 [默认: ${last_key}]: " api_key
+                read -rp "节点通讯密钥 [默认: $(mask_key "$last_key")]: " api_key
                 api_key=${api_key:-$last_key}
             else
                 read -rp "节点通讯密钥: " api_key

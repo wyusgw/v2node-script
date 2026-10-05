@@ -8,7 +8,7 @@ plain='\033[0m'
 cur_dir=$(pwd)
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}Error: ${plain} This script must be run as root!\n" && exit 1
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
 # check os
 if [[ -f /etc/redhat-release ]]; then
@@ -30,11 +30,12 @@ elif cat /proc/version | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linu
 elif cat /proc/version | grep -Eqi "arch"; then
     release="arch"
 else
-    echo -e "${red}Cannot detect the system version, please contact the script author!${plain}\n" && exit 1
+    echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
 ########################
-# Parse arguments
+# 参数解析
+########################
 VERSION_ARG=""
 API_HOST_ARG=""
 NODE_ID_ARG=""
@@ -58,19 +59,19 @@ parse_args() {
             --channel)
                 CHANNEL_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "Usage: $0 [version] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE] [--instance NAME] [--channel stable|beta]"
-                echo "--node-type is optional: when omitted the protocol is detected by the panel API (the v2node node type in the admin)"
-                echo "To pin a protocol specific table, use one of: vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
-                echo "--instance is optional: when omitted the default instance is installed/updated (/etc/v2node/config.json, v2node.service)"
-                echo "To run another fully independent v2node process on the same machine, give an instance name, e.g. --instance nodeB"
-                echo "(creates /etc/v2node/nodeB.json and manages v2node@nodeB.service with systemctl, the default instance is not affected)"
-                echo "--channel is optional: when omitted the previously chosen channel is reused (stable by default)"
-                echo "stable = official release (releases/latest); beta = rolling build of the dev branch, may be unstable"
+                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY] [--node-type TYPE] [--instance NAME] [--channel stable|beta]"
+                echo "--node-type 可省略：省略时协议由面板 API 自动判断（对应后台的 v2node 节点类型）"
+                echo "如需固定为某个协议专属表，可指定：vmess / vless / trojan / shadowsocks / hysteria2 / tuic / anytls / mieru"
+                echo "--instance 可省略：省略时安装/更新默认实例（/etc/v2node/config.json，v2node.service）"
+                echo "如需在同一台机器上再跑一个完全独立的 v2node 进程，指定一个实例名，例如 --instance nodeB"
+                echo "（会生成 /etc/v2node/nodeB.json，用 systemctl 管理 v2node@nodeB.service，不影响默认实例）"
+                echo "--channel 可省略：省略时沿用上次选择的安装分支（首次默认 stable）"
+                echo "stable = 正式发布版（releases/latest）；beta = dev 分支滚动构建的测试版，可能不稳定"
                 exit 0 ;;
             --*)
-                echo "Unknown argument: $1"; exit 1 ;;
+                echo "未知参数: $1"; exit 1 ;;
             *)
-                # Accept the first positional argument as the version
+                # 兼容第一个位置参数作为版本号
                 if [[ -z "$VERSION_ARG" ]]; then
                     VERSION_ARG="$1"; shift
                 else
@@ -92,8 +93,9 @@ is_cmd_exist() {
     return 2
 }
 
-# Install channel: stable = latest release, beta = rolling build of the dev branch.
-# Shared by all instances and remembered, so install/update without --channel reuses it.
+# 安装分支：stable=正式发布版（releases/latest），beta=dev 分支滚动构建的测试版。
+# 所有实例共用同一个分支设置（跟主程序共用一样，不分实例），记录在这个文件里，
+# 下次 install/update 不带 --channel 时就沿用它，不用每次都重新选
 CHANNEL_FILE="/etc/v2node/.channel"
 
 get_channel() {
@@ -104,7 +106,8 @@ get_channel() {
     fi
 }
 
-# An empty instance name means the default instance (/etc/v2node/config.json, v2node.service).
+# 实例名为空时对应原本的默认实例（/etc/v2node/config.json, v2node.service），
+# 保证没有用到 --instance 的既有用法完全不受影响
 instance_service_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -143,7 +146,8 @@ mask_key() {
     fi
 }
 
-# Named instances live in /etc/v2node/instances/<name>/, the default instance keeps /etc/v2node/config.json.
+# 命名实例各自一个文件夹（/etc/v2node/instances/<name>/），方便直接靠目录
+# 列表枚举有哪些实例；默认实例沿用原本的 /etc/v2node/config.json，不进文件夹
 instance_dir() {
     if [[ -z "$1" ]]; then
         echo "/etc/v2node"
@@ -152,7 +156,9 @@ instance_dir() {
     fi
 }
 
-# Alpine openrc has no systemd template units: one script plus per-instance symlinks, $SVCNAME gives the instance.
+# alpine openrc 没有 systemd 的 template unit，用「同一个脚本 + 不同文件名的
+# symlink」实现多实例：openrc 会把脚本被调用时的文件名放进 $SVCNAME，脚本本身
+# 再据此推出要读哪个实例的配置文件（见 install_v2node 里写入的 /etc/init.d/v2node）
 instance_init_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -171,13 +177,13 @@ elif [[ $arch == "s390x" ]]; then
     arch="s390x"
 else
     arch="64"
-    echo -e "${red}Failed to detect the architecture, using the default: ${arch}${plain}"
+    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
 fi
 
-echo "System: ${release}  Architecture: ${arch}"
+echo "系统: ${release}  架构: ${arch}"
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
-    echo "This software does not support 32-bit systems (x86), please use a 64-bit system (x86_64). If the detection is wrong, please contact the author"
+    echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
     exit 2
 fi
 
@@ -191,28 +197,28 @@ fi
 
 if [[ x"${release}" == x"centos" ]]; then
     if [[ ${os_version} -le 6 ]]; then
-        echo -e "${red}Please use CentOS 7 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
     fi
     if [[ ${os_version} -eq 7 ]]; then
-        echo -e "${red}Note: CentOS 7 cannot use the hysteria1/2 protocols!${plain}\n"
+        echo -e "${red}注意： CentOS 7 无法使用hysteria1/2协议！${plain}\n"
     fi
 elif [[ x"${release}" == x"ubuntu" ]]; then
     if [[ ${os_version} -lt 16 ]]; then
-        echo -e "${red}Please use Ubuntu 16 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 Ubuntu 16 或更高版本的系统！${plain}\n" && exit 1
     fi
 elif [[ x"${release}" == x"debian" ]]; then
     if [[ ${os_version} -lt 8 ]]; then
-        echo -e "${red}Please use Debian 8 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 Debian 8 或更高版本的系统！${plain}\n" && exit 1
     fi
 fi
 
 install_base() {
-    # Check and install packages in batches to reduce system calls
+    # 优化版本：批量检查和安装包，减少系统调用
     need_install_apt() {
         local packages=("$@")
         local missing=()
         
-        # Batch check the installed packages
+        # 批量检查已安装的包
         local installed_list=$(dpkg-query -W -f='${Package}\n' 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -222,7 +228,7 @@ install_base() {
         done
         
         if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "Installing missing packages: ${missing[*]}"
+            echo "安装缺失的包: ${missing[*]}"
             apt-get update -y >/dev/null 2>&1
             DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" >/dev/null 2>&1
         fi
@@ -232,7 +238,7 @@ install_base() {
         local packages=("$@")
         local missing=()
         
-        # Batch check the installed packages
+        # 批量检查已安装的包
         local installed_list=$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -242,7 +248,7 @@ install_base() {
         done
         
         if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "Installing missing packages: ${missing[*]}"
+            echo "安装缺失的包: ${missing[*]}"
             yum install -y "${missing[@]}" >/dev/null 2>&1
         fi
     }
@@ -251,7 +257,7 @@ install_base() {
         local packages=("$@")
         local missing=()
         
-        # Batch check the installed packages
+        # 批量检查已安装的包
         local installed_list=$(apk info 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -261,16 +267,16 @@ install_base() {
         done
         
         if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "Installing missing packages: ${missing[*]}"
+            echo "安装缺失的包: ${missing[*]}"
             apk add --no-cache "${missing[@]}" >/dev/null 2>&1
         fi
     }
 
-    # Install all required packages at once
+    # 一次性安装所有必需的包
     if [[ x"${release}" == x"centos" ]]; then
-        # Check and install epel-release
+        # 检查并安装 epel-release
         if ! rpm -q epel-release >/dev/null 2>&1; then
-            echo "Installing the EPEL repository..."
+            echo "安装 EPEL 源..."
             yum install -y epel-release >/dev/null 2>&1
         fi
         need_install_yum wget curl unzip tar cronie socat ca-certificates pv
@@ -285,23 +291,25 @@ install_base() {
         need_install_apt wget curl unzip tar cron socat ca-certificates pv
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
-        echo "Updating the package database..."
+        echo "更新包数据库..."
         pacman -Sy --noconfirm >/dev/null 2>&1
-        # --needed skips already installed packages
-        echo "Installing the required packages..."
+        # --needed 会跳过已安装的包，非常高效
+        echo "安装必需的包..."
         pacman -S --noconfirm --needed wget curl unzip tar cronie socat ca-certificates pv >/dev/null 2>&1
     fi
 }
 
 # 0: running, 1: not running, 2: not installed
-# $1 (optional): instance name, defaults to the default instance
+# $1 (可选): 实例名，省略时查默认实例
 check_status() {
     local instance="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
-    # Judge by the existence of the config file: template unit instances usually do not show up in
-    # systemctl list-unit-files, which made running named instances look "not installed".
+    # 用配置文件是否存在判断这个实例有没有配置过，而不是去 grep
+    # systemctl list-unit-files——template unit 实例化出来的具体单元名
+    # （如 v2node@test.service）通常不会出现在 list-unit-files 里，之前
+    # 这样判断会导致命名实例明明装好在跑，却一直被判定成"未安装"
     if [[ ! -f "$(instance_config_path "$instance")" ]]; then
         return 2
     fi
@@ -325,9 +333,9 @@ check_status() {
 }
 
 choose_node_type() {
-    local options=("auto (protocol detected by the panel API, recommended)" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
+    local options=("auto（由面板 API 自动判断协议，推荐）" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
     local values=("v2node" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
-    echo "Select the node type:" >&2
+    echo "请选择节点类型:" >&2
     local i=1
     for opt in "${options[@]}"; do
         echo "  $i) $opt" >&2
@@ -335,13 +343,13 @@ choose_node_type() {
     done
     local choice
     while true; do
-        read -rp "Enter the number [default: 1) auto]: " choice
+        read -rp "输入序号 [默认: 1) auto]: " choice
         choice=${choice:-1}
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#values[@]} )); then
             echo "${values[$((choice-1))]}"
             return 0
         fi
-        echo "Invalid input, please enter a number between 1 and ${#values[@]}" >&2
+        echo "输入无效，请输入 1-${#values[@]} 之间的数字" >&2
     done
 }
 
@@ -373,7 +381,7 @@ generate_v2node_config() {
     ]
 }
 EOF
-        echo -e "${green}v2node config file (${cfg}) generated, restarting the service${plain}"
+        echo -e "${green}v2node 配置文件(${cfg})生成完成,正在重新启动服务${plain}"
         if [[ x"${release}" == x"alpine" ]]; then
             service $(instance_init_name "$instance") restart
         else
@@ -383,9 +391,9 @@ EOF
         check_status "$instance"
         echo -e ""
         if [[ $? == 0 ]]; then
-            echo -e "${green}v2node restarted successfully${plain}"
+            echo -e "${green}v2node 重启成功${plain}"
         else
-            echo -e "${red}v2node may have failed to start, use v2node log${instance:+ $instance} to view the logs${plain}"
+            echo -e "${red}v2node 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"
         fi
 }
 
@@ -401,7 +409,7 @@ install_v2node() {
 
     local channel="${CHANNEL_ARG:-$(get_channel)}"
     if [[ "$channel" != "stable" && "$channel" != "beta" ]]; then
-        echo -e "${red}Unknown install channel: ${channel}, it must be stable or beta${plain}"
+        echo -e "${red}未知安装分支: ${channel}，只能是 stable 或 beta${plain}"
         exit 1
     fi
     if [[ -n "$CHANNEL_ARG" ]]; then
@@ -409,10 +417,11 @@ install_v2node() {
         echo "$channel" > "$CHANNEL_FILE"
     fi
 
-    # When the main program is already installed, do not download it again: that would replace the
-    # binary used by running instances. Binary and geo files are shared, config and service are per instance.
+    # 加实例时如果主程序已经装好了，就不要重新下载/解压——那会把正在跑的
+    # 默认实例（或其他已存在实例）用的那份二进制文件从脚下抽掉。二进制、
+    # geoip/geosite 是所有实例共用的一份，只有配置和 service 是各实例独立的。
     if [[ -n "$instance" && -f /usr/local/v2node/v2node ]]; then
-        echo -e "${green}v2node is already installed, skipping the download and only configuring instance [${instance}] service${plain}"
+        echo -e "${green}检测到 v2node 主程序已安装，跳过重新下载，仅为实例 [${instance}] 配置服务${plain}"
         last_version=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
     else
     if [[ -e /usr/local/v2node/ ]]; then
@@ -423,33 +432,33 @@ install_v2node() {
     cd /usr/local/v2node/
 
     if [[ -z "$version_param" && "$channel" == "beta" ]]; then
-        echo -e "${yellow}Current install channel: beta (rolling build of the dev branch, may be unstable)${plain}"
+        echo -e "${yellow}当前安装分支: 测试版（dev 分支滚动构建，可能不稳定）${plain}"
         last_version="beta"
         url="https://github.com/wyusgw/v2node/releases/download/beta/v2node-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "Download progress" > /usr/local/v2node/v2node-linux.zip
+        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}Failed to download the v2node beta, make sure your server can download files from GitHub, or the dev branch has no build artifact yet${plain}"
+            echo -e "${red}下载 v2node 测试版失败，请确保你的服务器能够下载 Github 的文件，或者 dev 分支还没有构建产物${plain}"
             exit 1
         fi
     elif  [[ -z "$version_param" ]] ; then
         last_version=$(curl -Ls "https://api.github.com/repos/wyusgw/v2node/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}Failed to detect the v2node version, the GitHub API limit may be exceeded. Try again later or specify the version manually${plain}"
+            echo -e "${red}检测 v2node 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 v2node 版本安装${plain}"
             exit 1
         fi
-        echo -e "${green}Latest version detected: ${last_version}. Installing...${plain}"
+        echo -e "${green}检测到最新版本：${last_version}，开始安装...${plain}"
         url="https://github.com/wyusgw/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "Download progress" > /usr/local/v2node/v2node-linux.zip
+        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}Failed to download v2node, make sure your server can download files from GitHub${plain}"
+            echo -e "${red}下载 v2node 失败，请确保你的服务器能够下载 Github 的文件${plain}"
             exit 1
         fi
     else
     last_version=$version_param
         url="https://github.com/wyusgw/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "Download progress" > /usr/local/v2node/v2node-linux.zip
+        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}Failed to download v2node $1, make sure this version exists${plain}"
+            echo -e "${red}下载 v2node $1 失败，请确保此版本存在${plain}"
             exit 1
         fi
     fi
@@ -462,7 +471,9 @@ install_v2node() {
     cp geosite.dat /etc/v2node/
     fi
 
-    # The service/init definition is shared by all instances and rewritten idempotently every time.
+    # service/init 脚本对所有实例都是共用同一份定义（systemd 的 template unit
+    # 用 %i 代入实例名；openrc 用同一个脚本 + $SVCNAME 判断自己是哪个实例），
+    # 每次都幂等地重写一遍，不管这次是不是为了加实例
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/v2node -f
         cat <<EOF > /etc/init.d/v2node
@@ -493,11 +504,11 @@ EOF
         if [[ -z "$instance" ]]; then
             rc-update add v2node default
         else
-            # openrc identifies the instance by the script file name, so symlink to the same script
+            # openrc 靠脚本文件名认实例，做一个指到同一份脚本的 symlink
             ln -sf /etc/init.d/v2node "/etc/init.d/$(instance_init_name "$instance")"
             rc-update add "$(instance_init_name "$instance")" default
         fi
-        echo -e "${green}v2node ${last_version}${plain} installed, autostart enabled"
+        echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
     else
         if [[ -z "$instance" ]]; then
             rm /etc/systemd/system/v2node.service -f
@@ -524,7 +535,8 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
         fi
-        # Named instances use the template unit (v2node@.service, %i is the instance name), rewritten idempotently
+        # 命名实例走 template unit（v2node@.service，%i 是实例名），一直存在、
+        # 幂等重写，不影响默认实例已经在用的 v2node.service
         rm /etc/systemd/system/v2node@.service -f
         cat <<EOF > /etc/systemd/system/v2node@.service
 [Unit]
@@ -555,14 +567,14 @@ EOF
         else
             systemctl enable "${svc}"
         fi
-        echo -e "${green}v2node ${last_version}${plain} installed, autostart enabled"
+        echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
     fi
 
     if [[ ! -f "$cfg" ]]; then
-        # With complete CLI arguments, generate the config directly and skip the prompts
+        # 如果通过 CLI 传入了完整参数，则直接生成配置并跳过交互
         if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
             generate_v2node_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG" "$NODE_TYPE_ARG" "$instance"
-            echo -e "${green}Generated from the arguments: ${cfg}${plain}"
+            echo -e "${green}已根据参数生成 ${cfg}${plain}"
             first_install=false
         else
             first_install=true
@@ -577,9 +589,9 @@ EOF
         check_status "$instance"
         echo -e ""
         if [[ $? == 0 ]]; then
-            echo -e "${green}v2node restarted successfully${plain}"
+            echo -e "${green}v2node 重启成功${plain}"
         else
-            echo -e "${red}v2node may have failed to start, use v2node log${instance:+ $instance} to view the logs${plain}"
+            echo -e "${red}v2node 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"
         fi
         first_install=false
     fi
@@ -591,26 +603,26 @@ EOF
     cd $cur_dir
     rm -f install.sh
     echo "----------------------------------------------------------"
-    echo -e "Management script usage: "
+    echo -e "管理脚本使用方法: "
     echo "----------------------------------------------------------"
-    echo "v2node                         - Show the management menu (more features)"
-    echo "v2node list                    - List the instances and their status"
-    echo "v2node new <name>              - Create an instance (collects the panel info interactively)"
-    echo "v2node remove <name> [name...] - Remove an instance"
-    echo "v2node rename <old> <new>      - Rename an instance"
-    echo "v2node start [name]            - Start an instance (no name = default instance)"
-    echo "v2node stop [name]             - Stop an instance"
-    echo "v2node restart [name]          - Restart an instance"
-    echo "v2node status [name]           - Show the instance status"
-    echo "v2node enable [name]           - Enable autostart for an instance"
-    echo "v2node disable [name]          - Disable autostart for an instance"
-    echo "v2node log [name] [-f]         - Show the instance logs (last 1000 lines by default, -f to follow)"
-    echo "v2node config [name]           - Edit the instance config and restart"
-    echo "v2node generate                - Generate the default instance config file"
-    echo "v2node update [version]        - Update v2node"
-    echo "v2node install                 - Install v2node"
-    echo "v2node uninstall               - Uninstall v2node (including all instances)"
-    echo "v2node version                 - Show the v2node version"
+    echo "v2node                         - 显示管理菜单 (功能更多)"
+    echo "v2node list                    - 列出已有实例及状态"
+    echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
+    echo "v2node remove <name> [name...] - 移除实例"
+    echo "v2node rename <old> <new>      - 重命名实例"
+    echo "v2node start [name]            - 启动实例（省略实例名=默认实例）"
+    echo "v2node stop [name]             - 停止实例"
+    echo "v2node restart [name]          - 重启实例"
+    echo "v2node status [name]           - 查看实例状态"
+    echo "v2node enable [name]           - 设置实例开机自启"
+    echo "v2node disable [name]          - 取消实例开机自启"
+    echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
+    echo "v2node config [name]           - 编辑实例配置并重启"
+    echo "v2node generate                - 生成默认实例配置文件"
+    echo "v2node update [version]        - 更新 v2node"
+    echo "v2node install                 - 安装 v2node"
+    echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
+    echo "v2node version                 - 查看 v2node 版本"
     echo "----------------------------------------------------------"
     # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
@@ -621,30 +633,31 @@ EOF
     fi
 
     if [[ $first_install == true ]]; then
-        read -rp "${cfg} does not exist yet, generate it now? (y/n): " if_generate
+        read -rp "检测到 ${cfg} 还不存在，是否现在生成？(y/n): " if_generate
         if [[ "$if_generate" =~ ^[Yy]$ ]]; then
-            # Collect the parameters interactively, reuse the last panel host/key as defaults
+            # 交互式收集参数，如果之前配置过其他实例，读上次用过的面板地址/
+            # 密钥当默认值，直接回车即可沿用
             local last_host="" last_key=""
             load_panel_defaults
 
-            read -rp "Panel API URL [format: https://example.com/]${last_host:+ [default: $last_host]}: " api_host
+            read -rp "面板API地址[格式: https://example.com/]${last_host:+ [默认: $last_host]}: " api_host
             api_host=${api_host:-${last_host:-https://example.com/}}
-            read -rp "Node ID: " node_id
+            read -rp "节点ID: " node_id
             node_id=${node_id:-1}
             if [[ -n "$last_key" ]]; then
-                read -rp "Node communication key [default: $(mask_key "$last_key")]: " api_key
+                read -rp "节点通讯密钥 [默认: $(mask_key "$last_key")]: " api_key
                 api_key=${api_key:-$last_key}
             else
-                read -rp "Node communication key: " api_key
+                read -rp "节点通讯密钥: " api_key
             fi
             node_type=$(choose_node_type)
 
             generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type" "$instance"
         else
             if [[ -z "$instance" ]]; then
-                echo "${green}Skipped generating the config. To generate it later run: v2node generate${plain}"
+                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"
             else
-                echo "${green}Skipped generating the config. To generate it later run: v2node new ${instance}${plain}"
+                echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node new ${instance}${plain}"
             fi
         fi
     fi
@@ -653,12 +666,12 @@ EOF
 if [[ x"${release}" != x"alpine" ]]; then
     is_cmd_exist "systemctl"
     if [[ $? != 0 ]]; then
-        echo -e "${red}The systemctl command does not exist, please use a newer system such as Ubuntu 18+ or Debian 9+${plain}"
+        echo -e "${red}systemctl 命令不存在，请使用较新版本的系统，例如 Ubuntu 18+、Debian 9+${plain}"
         exit 1
     fi
 fi
 
 parse_args "$@"
-echo -e "${green}Starting the installation${plain}"
+echo -e "${green}开始安装${plain}"
 install_base
 install_v2node "$VERSION_ARG"

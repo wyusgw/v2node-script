@@ -10,7 +10,7 @@ cur_dir=$(pwd)
 SCRIPT_VERSION="1.0.0"
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}Error: ${plain} This script must be run as root!\n" && exit 1
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
 # check os
 if [[ -f /etc/redhat-release ]]; then
@@ -32,7 +32,7 @@ elif cat /proc/version | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linu
 elif cat /proc/version | grep -Eqi "arch"; then
     release="arch"
 else
-    echo -e "${red}Cannot detect the system version, please contact the script author!${plain}\n" && exit 1
+    echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
 arch=$(uname -m)
@@ -45,11 +45,11 @@ elif [[ $arch == "s390x" ]]; then
     arch="s390x"
 else
     arch="64"
-    echo -e "${red}Failed to detect the architecture, using the default: ${arch}${plain}"
+    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
 fi
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
-    echo "This software does not support 32-bit systems (x86), please use a 64-bit system (x86_64). If the detection is wrong, please contact the author"
+    echo "本软件不支持 32 位系统(x86)，请使用 64 位系统(x86_64)，如果检测有误，请联系作者"
     exit 2
 fi
 
@@ -63,18 +63,18 @@ fi
 
 if [[ x"${release}" == x"centos" ]]; then
     if [[ ${os_version} -le 6 ]]; then
-        echo -e "${red}Please use CentOS 7 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
     fi
     if [[ ${os_version} -eq 7 ]]; then
-        echo -e "${red}Note: CentOS 7 cannot use the hysteria1/2 protocols!${plain}\n"
+        echo -e "${red}注意： CentOS 7 无法使用hysteria1/2协议！${plain}\n"
     fi
 elif [[ x"${release}" == x"ubuntu" ]]; then
     if [[ ${os_version} -lt 16 ]]; then
-        echo -e "${red}Please use Ubuntu 16 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 Ubuntu 16 或更高版本的系统！${plain}\n" && exit 1
     fi
 elif [[ x"${release}" == x"debian" ]]; then
     if [[ ${os_version} -lt 8 ]]; then
-        echo -e "${red}Please use Debian 8 or a newer system!${plain}\n" && exit 1
+        echo -e "${red}请使用 Debian 8 或更高版本的系统！${plain}\n" && exit 1
     fi
 fi
 
@@ -90,7 +90,8 @@ is_cmd_exist() {
     return 2
 }
 
-# An empty instance name means the default instance (/etc/v2node/config.json, v2node.service).
+# 实例名为空时对应默认实例（/etc/v2node/config.json, v2node.service），
+# 保证不带实例名的既有用法完全不受影响
 instance_service_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -129,7 +130,8 @@ mask_key() {
     fi
 }
 
-# Named instances live in /etc/v2node/instances/<name>/, the default instance keeps /etc/v2node/config.json.
+# 命名实例各自一个文件夹（/etc/v2node/instances/<name>/）；默认实例沿用原本
+# 的 /etc/v2node/config.json，不进文件夹
 instance_dir() {
     if [[ -z "$1" ]]; then
         echo "/etc/v2node"
@@ -146,16 +148,16 @@ instance_init_name() {
     fi
 }
 
-# Display name for logs and prompts: "v2node" for the default instance, "instance [name]" otherwise
+# 统一给日志/提示用的名字：默认实例就叫"v2node"，命名实例叫"实例 [name]"
 instance_label() {
     if [[ -z "$1" ]]; then
         echo "v2node"
     else
-        echo "instance [$1]"
+        echo "实例 [$1]"
     fi
 }
 
-# Name shown in the main menu entry "Manage instance [xxx]": the default instance shows as default
+# 主菜单"管理实例 [xxx]"里显示的名字：默认实例显示为 default
 instance_display_name() {
     if [[ -z "$1" ]]; then
         echo "default"
@@ -164,7 +166,7 @@ instance_display_name() {
     fi
 }
 
-# The install channel file is shared with install.sh, each side reads it on its own
+# 安装分支跟 install.sh 共用同一个文件，两边各自读，不互相调用
 CHANNEL_FILE="/etc/v2node/.channel"
 
 get_channel() {
@@ -177,15 +179,15 @@ get_channel() {
 
 channel_label() {
     if [[ "$(get_channel)" == "beta" ]]; then
-        echo "beta"
+        echo "测试版"
     else
-        echo "stable"
+        echo "稳定版"
     fi
 }
 
 confirm() {
     if [[ $# > 1 ]]; then
-        echo && read -rp "$1 [default $2]: " temp
+        echo && read -rp "$1 [默认$2]: " temp
         if [[ x"${temp}" == x"" ]]; then
             temp=$2
         fi
@@ -199,10 +201,14 @@ confirm() {
     fi
 }
 
-# Only wait for Enter. Never call show_menu recursively: the outer loop redraws the menu,
-# otherwise a long interactive session would keep deepening the bash call stack.
+# 只负责等用户按下 Enter，不在这里递归调用 show_menu——所有跟这个函数
+# 一样"跑完一个动作要回到主菜单"的地方，最终都是靠脚本最外层的 while
+# 循环重新显示菜单，不是靠函数互相递归。长时间使用同一个交互会话、反复
+# 在菜单间跳转时，递归调用 show_menu 会让 bash 的函数调用栈越叠越深、
+# 永远不会收回来，用久了可能把 shell 的调用栈撑爆，看起来就像脚本无缘
+# 无故直接退出
 before_show_menu() {
-    echo && echo -n -e "${yellow}Press Enter to return to the main menu: ${plain}" && read temp
+    echo && echo -n -e "${yellow}按回车返回主菜单: ${plain}" && read temp
 }
 
 install() {
@@ -218,7 +224,7 @@ install() {
 
 update() {
     if [[ $# == 0 ]]; then
-        echo && echo -n -e "Enter a version (default: latest): " && read version
+        echo && echo -n -e "输入指定版本(默认最新版): " && read version
     else
         version=$2
     fi
@@ -233,14 +239,14 @@ update() {
             done
         fi
         if [[ -f /etc/v2node/config.json && ${#named[@]} -eq 0 ]]; then
-            echo -e "${green}Update finished, v2node has been restarted, use v2node log to view the logs${plain}"
+            echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
         elif [[ -f /etc/v2node/config.json ]]; then
-            echo -e "${green}Update finished, the default instance has been restarted, use v2node log [name] to view the logs (no name = default instance)${plain}"
+            echo -e "${green}更新完成，已自动重启默认实例，请使用 v2node log [实例名] 查看运行日志（省略实例名即默认实例）${plain}"
         else
-            echo -e "${green}Update finished, use v2node log <name> to view the logs${plain}"
+            echo -e "${green}更新完成，请使用 v2node log <实例名> 查看运行日志${plain}"
         fi
         if [[ ${#named[@]} -gt 0 ]]; then
-            echo -e "${yellow}Named instances [${named[*]}] need v2node restart <name> each to use the new version${plain}"
+            echo -e "${yellow}命名实例 [${named[*]}] 需要分别执行 v2node restart <实例名> 才会用上新版本${plain}"
         fi
         exit
     fi
@@ -250,79 +256,79 @@ update() {
     fi
 }
 
-# $1: silent (non-empty = do not return to the main menu, used by the CLI)
+# $1: silent(非空=不返回主菜单，供CLI用)
 switch_channel() {
     local silent="$1"
     local cur target target_label
     cur=$(get_channel)
     target="beta"
-    target_label="beta"
+    target_label="测试版"
     if [[ "$cur" == "beta" ]]; then
         target="stable"
-        target_label="stable"
+        target_label="稳定版"
     fi
-    echo -e "Current install channel: $(channel_label)"
+    echo -e "当前安装分支: $(channel_label)"
     if [[ "$target" == "beta" ]]; then
-        echo -e "${yellow}The beta is a rolling build of the dev branch and may be unstable, use it in test environments only${plain}"
+        echo -e "${yellow}测试版是 dev 分支的滚动构建，可能不稳定，仅建议在测试环境使用${plain}"
     fi
-    confirm "Switch to ${target_label}?" "n"
+    confirm "确定要切换到${target_label}吗" "n"
     if [[ $? != 0 ]]; then
         [[ -z "$silent" ]] && before_show_menu
         return 0
     fi
     mkdir -p /etc/v2node
     echo "$target" > "$CHANNEL_FILE"
-    echo -e "${green}Switched to ${target_label}${plain}, the next install/update will use this channel"
+    echo -e "${green}已切换到${target_label}${plain}，下次安装/更新会使用这个分支"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         [[ -z "$silent" ]] && before_show_menu
         return 0
     fi
-    confirm "Reinstall/update v2node with the new channel now" "y"
+    confirm "是否立即按新分支重新安装/更新 v2node" "y"
     if [[ $? == 0 ]]; then
         update 0 ""
     fi
     [[ -z "$silent" ]] && before_show_menu
 }
 
-# $1: instance name (empty = default instance)  $2: silent (non-empty = do not return to the main menu)
+# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 config() {
     local name="$1"
     local silent="$2"
     local cfg=$(instance_config_path "$name")
     if [[ ! -f "$cfg" ]]; then
-        echo -e "${red}$(instance_label "$name") has no config file yet${plain}"
-        [[ -n "$name" ]] && echo -e "${yellow}Run this first: v2node new ${name}${plain}"
+        echo -e "${red}$(instance_label "$name") 还没有配置文件${plain}"
+        [[ -n "$name" ]] && echo -e "${yellow}请先执行: v2node new ${name}${plain}"
         if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
-    echo "The service will be restarted after the config is changed: $(instance_label "$name")"
+    echo "修改配置后会自动尝试重启$(instance_label "$name")"
     vi "$cfg"
     sleep 2
     restart "$name" 0
     check_status "$name"
     case $? in
         0)
-            echo -e "$(instance_label "$name") status: ${green}running${plain}"
+            echo -e "$(instance_label "$name")状态: ${green}已运行${plain}"
             ;;
         1)
-            echo -e "$(instance_label "$name") is not running or the automatic restart failed, view the logs? [Y/n]" && echo
-            read -e -rp "(default: y):" yn
+            echo -e "检测到$(instance_label "$name")未启动或自动重启失败，是否查看日志？[Y/n]" && echo
+            read -e -rp "(默认: y):" yn
             [[ -z ${yn} ]] && yn="y"
             if [[ ${yn} == [Yy] ]]; then
                log "$name" "" 0
             fi
             ;;
         2)
-            echo -e "$(instance_label "$name") status: ${red}not installed${plain}"
+            echo -e "$(instance_label "$name")状态: ${red}未安装${plain}"
     esac
     if [[ -z "$silent" ]]; then
         before_show_menu
     fi
 }
 
-# Full uninstall: also stops and removes all named instances so no orphan service is left
+# 完全卸载：连同所有命名实例一起停用/移除，不留下孤儿 service
 uninstall() {
-    confirm "Uninstall v2node? (all instances will be removed too)" "n"
+    confirm "确定要卸载 v2node 吗（会连同所有实例一起移除）?" "n"
     if [[ $? != 0 ]]; then
         return 0
     fi
@@ -357,7 +363,7 @@ uninstall() {
     rm /usr/local/v2node/ -rf
 
     echo ""
-    echo -e "Uninstalled. To remove this script, exit it and run ${green}rm /usr/bin/v2node -f${plain}"
+    echo -e "卸载成功，如果你想删除此脚本，则退出脚本后运行 ${green}rm /usr/bin/v2node -f${plain} 进行删除"
     echo ""
 
     if [[ $# == 0 ]]; then
@@ -365,8 +371,9 @@ uninstall() {
     fi
 }
 
-# The lifecycle commands share one format: FUNC [instance] [silent]
-# An empty instance means the default instance; a non-empty silent skips the interactive menu (CLI use).
+# 以下生命周期指令统一格式: FUNC [实例名] [silent]
+# 实例名留空 = 默认实例(v2node.service / /etc/v2node/config.json)
+# silent 非空时不会在结尾进交互菜单，供 CLI 直接调用；菜单调用时留空即可
 
 start() {
     local name="$1"
@@ -374,10 +381,10 @@ start() {
     check_status "$name"
     local st=$?
     if [[ $st == 2 ]]; then
-        echo -e "${red}$(instance_label "$name") is not installed or configured yet${plain}"
+        echo -e "${red}$(instance_label "$name") 还没有安装或配置${plain}"
     elif [[ $st == 0 ]]; then
         echo ""
-        echo -e "${green}$(instance_label "$name") is already running, choose restart if you want to restart it${plain}"
+        echo -e "${green}$(instance_label "$name") 已运行，无需再次启动，如需重启请选择重启${plain}"
     else
         if [[ x"${release}" == x"alpine" ]]; then
             service $(instance_init_name "$name") start
@@ -387,9 +394,9 @@ start() {
         sleep 2
         check_status "$name"
         if [[ $? == 0 ]]; then
-            echo -e "${green}$(instance_label "$name") started, use v2node log${name:+ $name} to view the logs${plain}"
+            echo -e "${green}$(instance_label "$name") 启动成功，请使用 v2node log${name:+ $name} 查看运行日志${plain}"
         else
-            echo -e "${red}$(instance_label "$name") may have failed to start, check the logs later with v2node log${name:+ $name}${plain}"
+            echo -e "${red}$(instance_label "$name") 可能启动失败，请稍后使用 v2node log${name:+ $name} 查看日志信息${plain}"
         fi
     fi
 
@@ -409,9 +416,9 @@ stop() {
     sleep 2
     check_status "$name"
     if [[ $? == 1 ]]; then
-        echo -e "${green}$(instance_label "$name") stopped${plain}"
+        echo -e "${green}$(instance_label "$name") 停止成功${plain}"
     else
-        echo -e "${red}$(instance_label "$name") failed to stop, it may have taken more than two seconds, check the logs later${plain}"
+        echo -e "${red}$(instance_label "$name") 停止失败，可能是因为停止时间超过了两秒，请稍后查看日志信息${plain}"
     fi
 
     if [[ -z "$silent" ]]; then
@@ -430,9 +437,9 @@ restart() {
     sleep 2
     check_status "$name"
     if [[ $? == 0 ]]; then
-        echo -e "${green}$(instance_label "$name") restarted, use v2node log${name:+ $name} to view the logs${plain}"
+        echo -e "${green}$(instance_label "$name") 重启成功，请使用 v2node log${name:+ $name} 查看运行日志${plain}"
     else
-        echo -e "${red}$(instance_label "$name") may have failed to start, check the logs later with v2node log${name:+ $name}${plain}"
+        echo -e "${red}$(instance_label "$name") 可能启动失败，请稍后使用 v2node log${name:+ $name} 查看日志信息${plain}"
     fi
     if [[ -z "$silent" ]]; then
         before_show_menu
@@ -461,9 +468,9 @@ enable() {
         systemctl enable "$(instance_service_name "$name")"
     fi
     if [[ $? == 0 ]]; then
-        echo -e "${green}$(instance_label "$name") autostart enabled${plain}"
+        echo -e "${green}$(instance_label "$name") 设置开机自启成功${plain}"
     else
-        echo -e "${red}$(instance_label "$name") failed to enable autostart${plain}"
+        echo -e "${red}$(instance_label "$name") 设置开机自启失败${plain}"
     fi
 
     if [[ -z "$silent" ]]; then
@@ -480,9 +487,9 @@ disable() {
         systemctl disable "$(instance_service_name "$name")"
     fi
     if [[ $? == 0 ]]; then
-        echo -e "${green}$(instance_label "$name") autostart disabled${plain}"
+        echo -e "${green}$(instance_label "$name") 取消开机自启成功${plain}"
     else
-        echo -e "${red}$(instance_label "$name") failed to disable autostart${plain}"
+        echo -e "${red}$(instance_label "$name") 取消开机自启失败${plain}"
     fi
 
     if [[ -z "$silent" ]]; then
@@ -490,13 +497,13 @@ disable() {
     fi
 }
 
-# $1: instance name  $2: follow (non-empty = -f, otherwise the last 1000 lines)  $3: silent
+# $1: 实例名  $2: follow(非空则用 -f 持续跟随，否则只看最后1000行)  $3: silent
 log() {
     local name="$1"
     local follow="$2"
     local silent="$3"
     if [[ x"${release}" == x"alpine" ]]; then
-        echo -e "${red}Log viewing is not supported on alpine yet${plain}"
+        echo -e "${red}alpine系统暂不支持日志查看${plain}"
         if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
@@ -514,23 +521,25 @@ update_shell() {
     wget -O /usr/bin/v2node -N --no-check-certificate https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/v2node.sh
     if [[ $? != 0 ]]; then
         echo ""
-        echo -e "${red}Failed to download the script, check that this machine can reach GitHub${plain}"
+        echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"
         before_show_menu
     else
         chmod +x /usr/bin/v2node
-        echo -e "${green}Script upgraded, please run it again${plain}" && exit 0
+        echo -e "${green}升级脚本成功，请重新运行脚本${plain}" && exit 0
     fi
 }
 
 # 0: running, 1: not running, 2: not installed
-# $1 (optional): instance name, defaults to the default instance
+# $1 (可选): 实例名，省略时查默认实例
 check_status() {
     local instance="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
-    # Judge by the existence of the config file: template unit instances usually do not show up in
-    # systemctl list-unit-files, which made running named instances look "not installed".
+    # 用配置文件是否存在判断这个实例有没有配置过，而不是去 grep
+    # systemctl list-unit-files——template unit 实例化出来的具体单元名
+    # （如 v2node@test.service）通常不会出现在 list-unit-files 里，之前
+    # 这样判断会导致命名实例明明装好在跑，却一直被判定成"未安装"
     if [[ ! -f "$(instance_config_path "$instance")" ]]; then
         return 2
     fi
@@ -555,7 +564,7 @@ check_status() {
     fi
 }
 
-# $1 (optional): instance name, defaults to the default instance
+# $1 (可选): 实例名，省略时查默认实例
 check_enabled() {
     local instance="$1"
     if [[ x"${release}" == x"alpine" ]]; then
@@ -581,7 +590,7 @@ check_uninstall() {
     check_status
     if [[ $? != 2 ]]; then
         echo ""
-        echo -e "${red}v2node is already installed, please do not install it again${plain}"
+        echo -e "${red}v2node已安装，请不要重复安装${plain}"
         if [[ $# == 0 ]]; then
             before_show_menu
         fi
@@ -591,14 +600,14 @@ check_uninstall() {
     fi
 }
 
-# $1: instance name (empty = default instance)  $2: silent (non-empty = do not return to the main menu)
+# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 check_install() {
     local instance="$1"
     local silent="$2"
     check_status "$instance"
     if [[ $? == 2 ]]; then
         echo ""
-        echo -e "${red}$(instance_label "$instance") is not installed or configured yet${plain}"
+        echo -e "${red}$(instance_label "$instance") 还没有安装或配置${plain}"
         if [[ -z "$silent" ]]; then
             before_show_menu
         fi
@@ -608,12 +617,14 @@ check_install() {
     fi
 }
 
-# Only checks that the main program is installed, used by the global commands (update/version/list/uninstall)
+# 只检查 v2node 主程序是否已安装，不看任何单个实例的配置，
+# 供 update/version/list/uninstall 这类不针对某个实例的全局命令使用
+# $1: silent(非空=不返回主菜单，供CLI用)
 check_binary_install() {
     local silent="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         echo ""
-        echo -e "${red}Please install v2node first${plain}"
+        echo -e "${red}请先安装v2node${plain}"
         if [[ -z "$silent" ]]; then
             before_show_menu
         fi
@@ -623,15 +634,15 @@ check_binary_install() {
     fi
 }
 
-# List the default instance and all named instances with their status (v2node list)
+# 列出默认实例 + 所有命名实例及各自状态（v2node list）
 list() {
-    echo "Known instances:"
+    echo "已知实例:"
     if [[ -f /etc/v2node/config.json ]]; then
         check_status ""
         case $? in
-            0) echo -e "  default  (v2node.service): ${green}running${plain}" ;;
-            1) echo -e "  default  (v2node.service): ${yellow}not running${plain}" ;;
-            *) echo -e "  default  (v2node.service): ${red}unknown${plain}" ;;
+            0) echo -e "  default  (v2node.service): ${green}已运行${plain}" ;;
+            1) echo -e "  default  (v2node.service): ${yellow}未运行${plain}" ;;
+            *) echo -e "  default  (v2node.service): ${red}未知${plain}" ;;
         esac
     fi
     local d name
@@ -641,45 +652,47 @@ list() {
             name=$(basename "$d")
             check_status "$name"
             case $? in
-                0) echo -e "  ${name}  (v2node@${name}.service): ${green}running${plain}" ;;
-                1) echo -e "  ${name}  (v2node@${name}.service): ${yellow}not running${plain}" ;;
-                *) echo -e "  ${name}  (v2node@${name}.service): ${red}unknown${plain}" ;;
+                0) echo -e "  ${name}  (v2node@${name}.service): ${green}已运行${plain}" ;;
+                1) echo -e "  ${name}  (v2node@${name}.service): ${yellow}未运行${plain}" ;;
+                *) echo -e "  ${name}  (v2node@${name}.service): ${red}未知${plain}" ;;
             esac
         done
     fi
 }
 
-# Create a named instance (v2node new <name>): collect the panel info, then delegate to install.sh --instance
+# 新建一个命名实例（v2node new <name>），交互式收集面板信息后委托给
+# install.sh --instance 处理（下载/跳过下载共用二进制、写 service、生成配置）
 new() {
     local name="$1"
     local silent="$2"
     if [[ -z "$name" ]]; then
-        read -rp "Enter an instance name (letters/digits, e.g. nodeB): " name
+        read -rp "请输入实例名(英文/数字，例如 nodeB): " name
     fi
     if [[ -z "$name" || "$name" == "config" ]]; then
-        echo -e "${red}The instance name cannot be empty${plain}"
+        echo -e "${red}实例名不能为空${plain}"
         if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
     if [[ -f "$(instance_config_path "$name")" ]]; then
-        echo -e "${red}Instance [${name}] already exists, to change its config use: v2node config ${name}${plain}"
+        echo -e "${red}实例 [${name}] 已存在，如需修改配置请用: v2node config ${name}${plain}"
         if [[ -z "$silent" ]]; then before_show_menu; fi
         return 1
     fi
 
-    # Reuse the last used panel host/key as defaults, press Enter to keep them
+    # 如果之前配置过其他实例（或默认实例），读上次用过的面板地址/密钥当
+    # 默认值，直接回车即可沿用，不用每次都重新输入同一个面板的信息
     local last_host="" last_key=""
     load_panel_defaults
 
-    read -rp "Panel API URL [format: https://example.com/]${last_host:+ [default: $last_host]}: " api_host
+    read -rp "面板API地址[格式: https://example.com/]${last_host:+ [默认: $last_host]}: " api_host
     api_host=${api_host:-${last_host:-https://example.com/}}
-    read -rp "Node ID: " node_id
+    read -rp "节点ID: " node_id
     node_id=${node_id:-1}
     if [[ -n "$last_key" ]]; then
-        read -rp "Node communication key [default: $(mask_key "$last_key")]: " api_key
+        read -rp "节点通讯密钥 [默认: $(mask_key "$last_key")]: " api_key
         api_key=${api_key:-$last_key}
     else
-        read -rp "Node communication key: " api_key
+        read -rp "节点通讯密钥: " api_key
     fi
     node_type=$(choose_node_type)
 
@@ -688,16 +701,16 @@ new() {
     if [[ -z "$silent" ]]; then before_show_menu; fi
 }
 
-# Remove one or more named instances (v2node remove <name> [name...]), the default instance is untouched
+# 移除一个或多个命名实例（v2node remove <name> [name...]），不影响默认实例
 remove() {
     if [[ $# == 0 ]]; then
-        echo -e "${red}Please specify an instance name: v2node remove <name> [name...]${plain}"
+        echo -e "${red}请指定实例名: v2node remove <name> [name...]${plain}"
         return 1
     fi
     local name
     for name in "$@"; do
         [[ -z "$name" ]] && continue
-        confirm "Remove instance [${name}]? (the default instance and other instances are not affected)" "n"
+        confirm "确定要移除实例 [${name}] 吗（不影响默认实例和其他实例）?" "n"
         if [[ $? != 0 ]]; then
             continue
         fi
@@ -711,24 +724,24 @@ remove() {
             systemctl reset-failed "$(instance_service_name "$name")" 2>/dev/null
         fi
         rm "$(instance_dir "$name")" -rf
-        echo -e "${green}Instance [${name}] removed (the shared v2node program is not affected)${plain}"
+        echo -e "${green}实例 [${name}] 已移除（共用的 v2node 主程序未受影响）${plain}"
     done
 }
 
-# Rename a named instance (v2node rename <old> <new>), the default instance cannot be renamed
+# 重命名一个命名实例（v2node rename <old> <new>），默认实例不支持重命名
 rename() {
     local old="$1"
     local new_name="$2"
     if [[ -z "$old" || -z "$new_name" ]]; then
-        echo -e "${red}Usage: v2node rename <old_name> <new_name>${plain}"
+        echo -e "${red}用法: v2node rename <old_name> <new_name>${plain}"
         return 1
     fi
     if [[ ! -f "$(instance_config_path "$old")" ]]; then
-        echo -e "${red}Instance [${old}] does not exist, or it is the default instance (it cannot be renamed)${plain}"
+        echo -e "${red}实例 [${old}] 不存在，或者它是默认实例（默认实例不支持重命名）${plain}"
         return 1
     fi
     if [[ -f "$(instance_config_path "$new_name")" ]]; then
-        echo -e "${red}Instance [${new_name}] already exists, choose another name${plain}"
+        echo -e "${red}实例 [${new_name}] 已存在，换一个名字${plain}"
         return 1
     fi
 
@@ -756,32 +769,33 @@ rename() {
         systemctl start "$(instance_service_name "$new_name")"
     fi
 
-    echo -e "${green}Instance [${old}] renamed to [${new_name}]${plain}"
+    echo -e "${green}实例 [${old}] 已重命名为 [${new_name}]${plain}"
 }
 
-# Submenu for a single instance, the default instance cannot be renamed or removed (use full uninstall)
+# 管理单一实例的子菜单（主菜单「管理实例 [xxx]」进来的），default 实例不给
+# 重命名/移除，要移除默认实例请走「完全卸载」
 instance_submenu() {
     local name="$1"
     local max=8
     echo -e "
-  ${green}Manage instance [$(instance_display_name "$name")]${plain}
+  ${green}管理实例 [$(instance_display_name "$name")]${plain}
 ————————————————
-  ${green}1.${plain} Start
-  ${green}2.${plain} Stop
-  ${green}3.${plain} Restart
-  ${green}4.${plain} Show status
-  ${green}5.${plain} View logs
-  ${green}6.${plain} Enable autostart
-  ${green}7.${plain} Disable autostart
-  ${green}8.${plain} Edit config"
+  ${green}1.${plain} 启动
+  ${green}2.${plain} 停止
+  ${green}3.${plain} 重启
+  ${green}4.${plain} 查看状态
+  ${green}5.${plain} 查看日志
+  ${green}6.${plain} 设置开机自启
+  ${green}7.${plain} 取消开机自启
+  ${green}8.${plain} 编辑配置"
     if [[ -n "$name" ]]; then
         max=10
-        echo -e "  ${green}9.${plain} Rename this instance
-  ${green}10.${plain} Remove this instance"
+        echo -e "  ${green}9.${plain} 重命名此实例
+  ${green}10.${plain} 移除此实例"
     fi
-    echo -e "  ${green}0.${plain} Back to the main menu
+    echo -e "  ${green}0.${plain} 返回主菜单
  "
-    read -rp "Enter your choice [0-${max}]: " iop
+    read -rp "请输入选择 [0-${max}]: " iop
     case "$iop" in
         0) return ;;
         1) start "$name" 0 ;;
@@ -794,20 +808,20 @@ instance_submenu() {
         8) config "$name" 0 ;;
         9)
             if [[ -n "$name" ]]; then
-                read -rp "New name: " new_name
+                read -rp "新名字: " new_name
                 rename "$name" "$new_name"
             else
-                echo -e "${red}The default instance cannot be renamed${plain}"
+                echo -e "${red}默认实例不支持重命名${plain}"
             fi
             ;;
         10)
             if [[ -n "$name" ]]; then
                 remove "$name"
             else
-                echo -e "${red}The default instance cannot be removed, use 'Full uninstall'${plain}"
+                echo -e "${red}默认实例不支持移除，请用「完全卸载」${plain}"
             fi
             ;;
-        *) echo -e "${red}Please enter a valid number [0-${max}]${plain}" ;;
+        *) echo -e "${red}请输入正确的数字 [0-${max}]${plain}" ;;
     esac
     before_show_menu
 }
@@ -845,39 +859,40 @@ get_latest_version() {
     fi
 }
 
-# Version line at the top of the main menu, checks the latest GitHub version live
+# 主菜单顶部的版本信息行，跟 soga 一样实时查 GitHub 最新版本、有更新就提示
 show_version_header() {
     local installed=""
     if [[ -f /usr/local/v2node/v2node ]]; then
         installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
     fi
     if [[ -n "$installed" ]]; then
-        echo -e "  ${green}v2node management script v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [channel: $(channel_label)]"
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
         latest=$(get_latest_version)
         if [[ -n "$latest" && "$latest" != "$installed" ]]; then
-            echo -e "  ${yellow}New version found: v2node ${latest}${plain}"
+            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
         fi
     else
-        echo -e "  ${green}v2node management script v${SCRIPT_VERSION}${plain}  [v2node: not installed]  [channel: $(channel_label)]"
+        echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]  [分支: $(channel_label)]"
     fi
 }
 
-# Instance list at the bottom of the main menu: status, autostart and config path of each instance
+# 主菜单底部的实例列表：default + 所有命名实例，各自的运行状态/开机自启/
+# 配置文件路径都列出来，格式对齐 soga 的「实例列表」
 show_instance_list() {
     echo ""
-    echo "  Instances:"
+    echo "  实例列表:"
     local status_text enable_text
     if [[ -f /etc/v2node/config.json ]]; then
         check_status ""
         case $? in
-            0) status_text="${green}running${plain}" ;;
-            1) status_text="${yellow}not running${plain}" ;;
-            *) status_text="${red}not installed${plain}" ;;
+            0) status_text="${green}已运行${plain}" ;;
+            1) status_text="${yellow}未运行${plain}" ;;
+            *) status_text="${red}未安装${plain}" ;;
         esac
         check_enabled ""
-        if [[ $? == 0 ]]; then enable_text="${green}yes${plain}"; else enable_text="${red}no${plain}"; fi
-        printf "    %-12s [%b] [autostart: %b]  %s\n" "default" "$status_text" "$enable_text" "/etc/v2node/config.json"
+        if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
+        printf "    %-12s [%b] [自启: %b]  %s\n" "default" "$status_text" "$enable_text" "/etc/v2node/config.json"
     fi
 
     local d name
@@ -887,18 +902,18 @@ show_instance_list() {
             name=$(basename "$d")
             check_status "$name"
             case $? in
-                0) status_text="${green}running${plain}" ;;
-                1) status_text="${yellow}not running${plain}" ;;
-                *) status_text="${red}not installed${plain}" ;;
+                0) status_text="${green}已运行${plain}" ;;
+                1) status_text="${yellow}未运行${plain}" ;;
+                *) status_text="${red}未安装${plain}" ;;
             esac
             check_enabled "$name"
-            if [[ $? == 0 ]]; then enable_text="${green}yes${plain}"; else enable_text="${red}no${plain}"; fi
-            printf "    %-12s [%b] [autostart: %b]  %s\n" "$name" "$status_text" "$enable_text" "$(instance_config_path "$name")"
+            if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
+            printf "    %-12s [%b] [自启: %b]  %s\n" "$name" "$status_text" "$enable_text" "$(instance_config_path "$name")"
         done
     fi
 }
 
-# Install and update share one entry: install when missing, update when installed
+# 安装/更新合并成一个入口：还没装就安装，已经装了就更新，对齐 soga 的「安装/更新」
 install_or_update() {
     # check_status "" only looks at the default instance, so it reports "not installed" whenever
     # the default instance has no config (e.g. only named instances exist) and would wrongly run a
@@ -911,7 +926,7 @@ install_or_update() {
 }
 
 show_v2node_version() {
-    echo -n "v2node version: "
+    echo -n "v2node 版本："
     /usr/local/v2node/v2node version
     echo ""
     if [[ $# == 0 ]]; then
@@ -920,9 +935,9 @@ show_v2node_version() {
 }
 
 choose_node_type() {
-    local options=("auto (protocol detected by the panel API, recommended)" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
+    local options=("auto（由面板 API 自动判断协议，推荐）" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
     local values=("v2node" "vmess" "vless" "trojan" "shadowsocks" "hysteria2" "tuic" "anytls" "mieru")
-    echo "Select the node type:" >&2
+    echo "请选择节点类型:" >&2
     local i=1
     for opt in "${options[@]}"; do
         echo "  $i) $opt" >&2
@@ -930,13 +945,13 @@ choose_node_type() {
     done
     local choice
     while true; do
-        read -rp "Enter the number [default: 1) auto]: " choice
+        read -rp "输入序号 [默认: 1) auto]: " choice
         choice=${choice:-1}
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#values[@]} )); then
             echo "${values[$((choice-1))]}"
             return 0
         fi
-        echo "Invalid input, please enter a number between 1 and ${#values[@]}" >&2
+        echo "输入无效，请输入 1-${#values[@]} 之间的数字" >&2
     done
 }
 
@@ -965,7 +980,7 @@ generate_v2node_config() {
     ]
 }
 EOF
-        echo -e "${green}V2node config generated, restarting the service${plain}"
+        echo -e "${green}V2node 配置文件生成完成,正在重新启动服务${plain}"
         if [[ x"${release}" == x"alpine" ]]; then
             service v2node restart
         else
@@ -975,34 +990,34 @@ EOF
         check_status
         echo -e ""
         if [[ $? == 0 ]]; then
-            echo -e "${green}v2node restarted successfully${plain}"
+            echo -e "${green}v2node 重启成功${plain}"
         else
-            echo -e "${red}v2node may have failed to start, use v2node log to view the logs${plain}"
+            echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
         fi
 }
 
 
 generate_config_file() {
-    # Collect the parameters interactively, reuse the last panel host/key as defaults
+    # 交互式收集参数，如果之前配置过实例，读上次用过的面板地址/密钥当默认值
     local last_host="" last_key=""
     load_panel_defaults
 
-    read -rp "Panel API URL [format: https://example.com/]${last_host:+ [default: $last_host]}: " api_host
+    read -rp "面板API地址[格式: https://example.com/]${last_host:+ [默认: $last_host]}: " api_host
     api_host=${api_host:-${last_host:-https://example.com/}}
-    read -rp "Node ID: " node_id
+    read -rp "节点ID: " node_id
     node_id=${node_id:-1}
     if [[ -n "$last_key" ]]; then
-        read -rp "Node communication key [default: $(mask_key "$last_key")]: " api_key
+        read -rp "节点通讯密钥 [默认: $(mask_key "$last_key")]: " api_key
         api_key=${api_key:-$last_key}
     else
-        read -rp "Node communication key: " api_key
+        read -rp "节点通讯密钥: " api_key
     fi
     node_type=$(choose_node_type)
 
     generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type"
 }
 
-# Open the firewall ports
+# 放开防火墙端口
 open_ports() {
     systemctl stop firewalld.service 2>/dev/null
     systemctl disable firewalld.service 2>/dev/null
@@ -1016,49 +1031,51 @@ open_ports() {
     iptables -F 2>/dev/null
     iptables -X 2>/dev/null
     netfilter-persistent save 2>/dev/null
-    echo -e "${green}Firewall ports opened!${plain}"
+    echo -e "${green}放开防火墙端口成功！${plain}"
 }
 
 show_usage() {
-    echo "v2node management script usage: "
+    echo "v2node 管理脚本使用方法: "
     echo "----------------------------------------------------------"
-    echo "v2node                         - Show the management menu (more features)"
-    echo "v2node list                    - List the instances and their status"
-    echo "v2node new <name>              - Create an instance (collects the panel info interactively)"
-    echo "v2node remove <name> [name...] - Remove an instance"
-    echo "v2node rename <old> <new>      - Rename an instance"
-    echo "v2node start [name]            - Start an instance (no name = default instance)"
-    echo "v2node stop [name]             - Stop an instance"
-    echo "v2node restart [name]          - Restart an instance"
-    echo "v2node status [name]           - Show the instance status"
-    echo "v2node enable [name]           - Enable autostart for an instance"
-    echo "v2node disable [name]          - Disable autostart for an instance"
-    echo "v2node log [name] [-f]         - Show the instance logs (last 1000 lines by default, -f to follow)"
-    echo "v2node config [name]           - Edit the instance config and restart"
-    echo "v2node generate                - Generate the default instance config file"
-    echo "v2node update [version]        - Update v2node"
-    echo "v2node install                 - Install v2node"
-    echo "v2node uninstall               - Uninstall v2node (including all instances)"
-    echo "v2node version                 - Show the v2node version"
-    echo "v2node channel [stable|beta]   - Show/switch the install channel (no argument = show the current channel)"
-    echo "v2node update_shell            - Update the management script"
+    echo "v2node                         - 显示管理菜单 (功能更多)"
+    echo "v2node list                    - 列出已有实例及状态"
+    echo "v2node new <name>              - 新建实例（交互式收集面板信息）"
+    echo "v2node remove <name> [name...] - 移除实例"
+    echo "v2node rename <old> <new>      - 重命名实例"
+    echo "v2node start [name]            - 启动实例（省略实例名=默认实例）"
+    echo "v2node stop [name]             - 停止实例"
+    echo "v2node restart [name]          - 重启实例"
+    echo "v2node status [name]           - 查看实例状态"
+    echo "v2node enable [name]           - 设置实例开机自启"
+    echo "v2node disable [name]          - 取消实例开机自启"
+    echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
+    echo "v2node config [name]           - 编辑实例配置并重启"
+    echo "v2node generate                - 生成默认实例配置文件"
+    echo "v2node update [version]        - 更新 v2node"
+    echo "v2node install                 - 安装 v2node"
+    echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
+    echo "v2node version                 - 查看 v2node 版本"
+    echo "v2node channel [stable|beta]   - 查看/切换安装分支（不带参数=查看当前分支）"
+    echo "v2node update_shell            - 更新管理脚本"
     echo "----------------------------------------------------------"
 }
 
 show_menu() {
     show_version_header
     echo -e "
-  ${green}0.${plain} Exit
+  ${green}0.${plain} 退出
 ————————————————
-  ${green}1.${plain} Install/update v2node
-  ${green}2.${plain} Full uninstall of v2node
+  ${green}1.${plain} 安装/更新 v2node
+  ${green}2.${plain} 完全卸载 v2node
 ————————————————
-  ${green}3.${plain} Update the management script
-  ${green}4.${plain} Switch the install channel [current: $(channel_label)]
-  ${green}5.${plain} Add a v2node instance
+  ${green}3.${plain} 更新管理脚本
+  ${green}4.${plain} 切换安装分支 [当前: $(channel_label)]
+  ${green}5.${plain} 新增 v2node 实例
 ————————————————"
 
-    # Each existing instance gets its own numbered menu line starting from 6
+    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 6 开始依序编号，
+    # 而不是只有一行、靠输入实例名切换焦点——实例数量本来就不多，直接
+    # 每个都给一个号码更直觉
     local menu_instances=()
     if [[ -f /etc/v2node/config.json ]]; then
         menu_instances+=("")
@@ -1072,16 +1089,16 @@ show_menu() {
     fi
     local i num_i=6
     for i in "${menu_instances[@]}"; do
-        echo -e "  ${green}${num_i}.${plain} Manage instance [$(instance_display_name "$i")]"
+        echo -e "  ${green}${num_i}.${plain} 管理实例 [$(instance_display_name "$i")]"
         num_i=$((num_i + 1))
     done
     echo " "
     show_instance_list
     local max=$((6 + ${#menu_instances[@]} - 1))
-    echo && read -rp "Enter your choice [0-${max}] or [instance name]: " num
+    echo && read -rp "请输入选择 [0-${max}] 或 [实例名]: " num
 
     case "${num}" in
-        0|"") echo -e "${red}Enter your choice [0-${max}]${plain}" && exit ;;
+        0|"") echo -e "${red}请输入选择 [0-${max}]${plain}" && exit ;;
         1) install_or_update ;;
         2) check_binary_install && uninstall ;;
         3) update_shell ;;
@@ -1096,7 +1113,7 @@ show_menu() {
                 [[ "$num" != "default" ]] && picked="$num"
                 check_install "$picked" && instance_submenu "$picked"
             else
-                echo -e "${red}Please enter a valid number [0-${max}], or the name of an existing instance${plain}"
+                echo -e "${red}请输入正确的数字 [0-${max}]，或是一个存在的实例名${plain}"
                 before_show_menu
             fi
             ;;
@@ -1106,7 +1123,7 @@ show_menu() {
 if [[ x"${release}" != x"alpine" ]]; then
     is_cmd_exist "systemctl"
     if [[ $? != 0 ]]; then
-        echo -e "${red}The systemctl command does not exist, please use a newer system such as Ubuntu 18+ or Debian 9+${plain}"
+        echo -e "${red}systemctl 命令不存在，请使用较新版本的系统，例如 Ubuntu 18+、Debian 9+${plain}"
         exit 1
     fi
 fi
@@ -1145,20 +1162,21 @@ if [[ $# > 0 ]]; then
         "update_shell") update_shell ;;
         "channel")
             if [[ -z "$2" ]]; then
-                echo "Current install channel: $(channel_label)"
+                echo "当前安装分支: $(channel_label)"
             elif [[ "$2" == "stable" || "$2" == "beta" ]]; then
                 mkdir -p /etc/v2node
                 echo "$2" > "$CHANNEL_FILE"
-                echo -e "${green}Switched to $(channel_label)${plain}, the next install/update will use this channel, run v2node update to apply it now"
+                echo -e "${green}已切换到$(channel_label)${plain}，下次安装/更新会使用这个分支，执行 v2node update 立即生效"
             else
-                echo -e "${red}Unknown channel: $2, it must be stable or beta${plain}"
+                echo -e "${red}未知分支: $2，只能是 stable 或 beta${plain}"
             fi
             ;;
         *) show_usage
     esac
 else
-    # Interactive mode redraws the main menu from this outer loop; show_menu, before_show_menu and
-    # instance_submenu never call each other recursively, so the call stack does not grow with use.
+    # 交互模式靠这个外层循环反复重新显示主菜单，show_menu/before_show_menu/
+    # instance_submenu 彼此之间不会再递归调用对方，调用栈不会随着使用时长
+    # 无限变深
     while true; do
         show_menu
     done

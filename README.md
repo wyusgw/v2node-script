@@ -1,48 +1,49 @@
 # v2node
-A v2board backend based on a modified xray-core.
+A v2board backend base on moddified xray-core.
+一个基于修改版xray内核的V2board节点服务端。
 
-## Installation
+## 软件安装
 
-### One-click install
+### 一键安装
 
 ```
 wget -N https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh && bash install.sh
 ```
 
-## Multiple instances
+## 多实例
 
-If you only need several nodes of the same panel on one machine, the `Nodes` entry of `config.json` is already an array: add more entries to one process / one config. You do not need the multi-instance feature below.
+同一台机器上，如果只是要接同一个面板下的多个节点，`config.json` 的 `Nodes` 本来就是数组，一个进程/一份配置里多加几笔即可，不需要用到下面的多实例功能。
 
-A multi-instance setup runs another fully independent v2node process on the same machine (its own config file and systemd service, started/stopped/restarted separately without affecting the others). It suits connecting to different panels, or restarting one node without touching the others. Only the `/usr/local/v2node/v2node` binary and the geoip/geosite data are shared.
+多实例指的是在同一台机器上再跑一个完全独立的 v2node 进程（独立的配置文件、独立的 systemd 服务、可以分别 start/stop/restart，互不影响），适合接不同面板、或想让某个节点能单独重启而不影响其他节点的场景。共用的只有 `/usr/local/v2node/v2node` 主程序和 geoip/geosite 数据。
 
-The instance name is an optional argument after the command. Without it the default instance (the one created on the first install) is used:
-
-```
-v2node list                    # list the instances and their status
-v2node new <name>              # create an instance (collects the panel info interactively)
-v2node remove <name> [name...] # remove one or more instances (the default instance and others are not affected)
-v2node rename <old> <new>      # rename an instance
-v2node start [name]            # start an instance, no name = default instance
-v2node stop [name]             # stop an instance
-v2node restart [name]          # restart an instance
-v2node status [name]           # show the instance status
-v2node enable [name]           # enable autostart for an instance
-v2node disable [name]          # disable autostart for an instance
-v2node log [name] [-f]         # show the instance logs, last 1000 lines by default, -f to follow
-v2node config [name]           # edit the instance config and restart it
-```
-
-You can also run `v2node` without arguments to open the interactive menu and choose "Manage instance".
-
-## Install channel
-
-The stable channel (the official release on GitHub Releases) is used by default. You can switch to the beta channel: it is the rolling build of the `dev` branch of the v2node repository (rebuilt on every push to `dev` and published over the `beta` tag). It may be unstable and is only recommended for test environments.
+实例名作为可选参数直接跟在指令后面，省略实例名就是操作默认实例（第一次安装时生成的那个）：
 
 ```
-v2node channel            # show the current channel
-v2node channel stable     # switch back to stable
-v2node channel beta       # switch to beta
-v2node update             # reinstall/update using the current channel
+v2node list                    # 列出已有实例及状态
+v2node new <name>              # 新建一个实例（交互式收集面板信息）
+v2node remove <name> [name...] # 移除一个或多个实例（不影响默认实例和其他实例）
+v2node rename <old> <new>      # 重命名一个实例
+v2node start [name]            # 启动实例，省略 name 操作默认实例
+v2node stop [name]             # 停止实例
+v2node restart [name]          # 重启实例
+v2node status [name]           # 查看实例状态
+v2node enable [name]           # 设置实例开机自启
+v2node disable [name]          # 取消实例开机自启
+v2node log [name] [-f]         # 查看实例日志，默认最后1000行，加 -f 持续跟随
+v2node config [name]           # 编辑实例配置并自动重启
 ```
 
-The interactive menu has a matching "Switch the install channel" entry. `install.sh` also accepts `--channel stable|beta`; when omitted, the last choice is reused (stable on the first run).
+也可以运行 `v2node`（不带参数）进入交互菜单，选择「管理多实例」。
+
+## 安装分支
+
+默认走稳定版（GitHub Releases 里的正式版本）。也可以切换到测试版：测试版是 v2node 仓库 `dev` 分支的滚动构建（每次 push 到 `dev` 都会重新构建，固定用 `beta` 这个 tag 覆盖发布），可能不稳定，仅建议测试环境使用。
+
+```
+v2node channel            # 查看当前分支
+v2node channel stable     # 切换回稳定版
+v2node channel beta       # 切换到测试版
+v2node update             # 按当前分支重新安装/更新
+```
+
+交互菜单里对应「切换安装分支」这一项。install.sh 也支持 `--channel stable|beta` 参数，省略时沿用上次选择（首次默认 stable）。

@@ -201,13 +201,6 @@ confirm() {
     fi
 }
 
-confirm_restart() {
-    confirm "是否重启v2node" "y"
-    if [[ $? == 0 ]]; then
-        restart
-    fi
-}
-
 # 只负责等用户按下 Enter，不在这里递归调用 show_menu——所有跟这个函数
 # 一样"跑完一个动作要回到主菜单"的地方，最终都是靠脚本最外层的 while
 # 循环重新显示菜单，不是靠函数互相递归。长时间使用同一个交互会话、反复

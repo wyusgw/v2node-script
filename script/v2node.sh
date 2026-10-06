@@ -222,9 +222,66 @@ install() {
     fi
 }
 
+# Release versions, newest first, one per line. The releases atom feed is not rate limited,
+# so it is tried first and the API is only the fallback.
+list_release_versions() {
+    local list
+    list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##' | grep -E '^[vV]?[0-9]' | awk '!seen[$0]++' | head -15)
+    if [[ -z "$list" ]]; then
+        list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://api.github.com/repos/wyusgw/v2node/releases?per_page=15" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '^[vV]?[0-9]')
+    fi
+    echo "$list"
+}
+
+# Sets $chosen_version: empty means the latest version of the current channel.
+# Accepts a number from the list, a typed version (with or without v), or Enter for the latest.
+choose_update_version() {
+    chosen_version=""
+    local installed="" list=() line
+    if [[ -f /usr/local/v2node/v2node ]]; then
+        installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
+    fi
+    echo -e "\n正在获取可用版本..."
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && list+=("$line")
+    done < <(list_release_versions)
+    if [[ ${#list[@]} -eq 0 ]]; then
+        echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
+    else
+        echo -e "可更新的版本（当前: ${installed:-未安装}）:"
+        local i mark
+        for i in "${!list[@]}"; do
+            mark=""
+            [[ $i -eq 0 ]] && mark="  最新"
+            [[ -n "$installed" && "${list[$i]#[vV]}" == "${installed#[vV]}" ]] && mark="${mark}  ${green}<- 当前版本${plain}"
+            echo -e "  $((i + 1)). ${list[$i]}${mark}"
+        done
+    fi
+    local input
+    while true; do
+        read -rp "输入序号或版本号，直接回车=最新版: " input
+        if [[ -z "$input" ]]; then
+            return 0
+        elif [[ "$input" =~ ^[0-9]+$ ]]; then
+            # a bare number is a list position, never a version
+            if (( input >= 1 && input <= ${#list[@]} )); then
+                chosen_version="${list[$((input - 1))]}"
+                break
+            fi
+            echo -e "${red}序号超出范围，请重新输入${plain}"
+        else
+            chosen_version="$input"
+            break
+        fi
+    done
+    echo -e "将安装版本: ${green}${chosen_version:-最新版}${plain}"
+}
+
 update() {
+    local version
     if [[ $# == 0 ]]; then
-        echo && echo -n -e "输入指定版本(默认最新版): " && read version
+        choose_update_version
+        version="$chosen_version"
     else
         version=$2
     fi
@@ -1106,7 +1163,7 @@ show_usage() {
     echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
     echo "v2node config [name]           - 编辑实例配置并重启"
     echo "v2node generate                - 生成默认实例配置文件"
-    echo "v2node update [version]        - 更新 v2node"
+    echo "v2node update [version]        - 更新 v2node（不带版本号=最新版；菜单里更新可从版本列表选择或手动输入）"
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看版本信息（管理脚本/已安装/最新）"

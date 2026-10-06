@@ -826,8 +826,8 @@ instance_submenu() {
     before_show_menu
 }
 
-# Look up the latest version once; only called from the background refresh below,
-# with short timeouts so an unreachable GitHub never holds up anything in the foreground.
+# Look up the latest published version with short timeouts so an unreachable GitHub cannot hang the menu.
+# The releases page redirect is the fallback when the API is rate limited or blocked.
 fetch_latest_version() {
     local latest
     if [[ "$(get_channel)" == "beta" ]]; then
@@ -835,31 +835,37 @@ fetch_latest_version() {
         [[ -n "$latest" ]] && latest="beta-${latest}"
     else
         latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        if [[ -z "$latest" ]]; then
+            latest=$(curl -sIL -o /dev/null -w '%{url_effective}' --connect-timeout 2 --max-time 4 "https://github.com/wyusgw/v2node/releases/latest" 2>/dev/null | sed -n 's#.*/releases/tag/##p')
+        fi
     fi
     echo "$latest"
 }
 
-# The menu header calls this on every display, so it must never wait for the network:
-# print the cached value and refresh it in the background when missing or older than 6 hours
-# (the new value shows up the next time the menu is displayed).
+# Print the cached latest version, refreshing it first when missing or older than 30 minutes.
+# After a failed lookup the next attempt waits 5 minutes, so an unreachable GitHub costs a few
+# seconds at most once per 5 minutes instead of on every menu display.
 get_latest_version() {
     local dir="/run"
     [[ -d "$dir" && -w "$dir" ]] || dir="/tmp"
     local cache="${dir}/.v2node_latest_$(get_channel)"
-    if [[ -s "$cache" ]]; then
-        cat "$cache"
-    fi
-    if [[ ! -s "$cache" || -n "$(find "$cache" -mmin +360 2>/dev/null)" ]]; then
-        (
+    local fail="${cache}.fail"
+    if [[ ! -s "$cache" || -n "$(find "$cache" -mmin +30 2>/dev/null)" ]]; then
+        if [[ -z "$(find "$fail" -mmin -5 2>/dev/null)" ]]; then
+            local latest
             latest=$(fetch_latest_version)
             if [[ -n "$latest" ]]; then
                 echo "$latest" > "${cache}.tmp" && mv -f "${cache}.tmp" "$cache"
+                rm -f "$fail"
+            else
+                touch "$fail" 2>/dev/null
             fi
-        ) >/dev/null 2>&1 &
+        fi
     fi
+    [[ -s "$cache" ]] && cat "$cache"
 }
 
-# 主菜单顶部的版本信息行，跟 soga 一样实时查 GitHub 最新版本、有更新就提示
+# 主菜单顶部的版本信息行，实时查 GitHub 最新版本、有更新就提示
 show_version_header() {
     local installed=""
     if [[ -f /usr/local/v2node/v2node ]]; then
@@ -869,8 +875,8 @@ show_version_header() {
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
         latest=$(get_latest_version)
-        if [[ -n "$latest" && "$latest" != "$installed" ]]; then
-            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
+        if [[ -n "$latest" && "${latest#v}" != "${installed#v}" ]]; then
+            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}，运行 v2node update 更新${plain}"
         fi
     else
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]  [分支: $(channel_label)]"

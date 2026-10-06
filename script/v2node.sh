@@ -865,6 +865,27 @@ get_latest_version() {
     [[ -s "$cache" ]] && cat "$cache"
 }
 
+# True only when $1 is a strictly newer release than $2 (v prefix ignored). Anything that is not a
+# plain numeric version, such as the beta channel's beta-<commit>, falls back to "different means newer".
+version_is_newer() {
+    local a="${1#[vV]}" b="${2#[vV]}"
+    [[ "$a" == "$b" ]] && return 1
+    if [[ ! "$a" =~ ^[0-9]+(\.[0-9]+)*$ || ! "$b" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        return 0
+    fi
+    local -a pa pb
+    IFS=. read -ra pa <<< "$a"
+    IFS=. read -ra pb <<< "$b"
+    local i n=${#pa[@]}
+    (( ${#pb[@]} > n )) && n=${#pb[@]}
+    for (( i = 0; i < n; i++ )); do
+        local x=$((10#${pa[i]:-0})) y=$((10#${pb[i]:-0}))
+        (( x > y )) && return 0
+        (( x < y )) && return 1
+    done
+    return 1
+}
+
 # 主菜单顶部的版本信息行，实时查 GitHub 最新版本、有更新就提示
 show_version_header() {
     local installed=""
@@ -875,8 +896,8 @@ show_version_header() {
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
         latest=$(get_latest_version)
-        if [[ -n "$latest" && "${latest#[vV]}" != "${installed#[vV]}" ]]; then
-            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}，运行 v2node update 更新${plain}"
+        if [[ -n "$latest" ]] && version_is_newer "$latest" "$installed"; then
+            echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}"
         fi
     else
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]  [分支: $(channel_label)]"

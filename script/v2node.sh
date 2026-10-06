@@ -259,7 +259,7 @@ choose_update_version() {
     fi
     local input
     while true; do
-        read -rp "输入序号或版本号，直接回车=最新版: " input
+        read -rp "输入序号或版本号直接回车(最新版): " input
         if [[ -z "$input" ]]; then
             return 0
         elif [[ "$input" =~ ^[0-9]+$ ]]; then
@@ -1163,7 +1163,7 @@ show_usage() {
     echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
     echo "v2node config [name]           - 编辑实例配置并重启"
     echo "v2node generate                - 生成默认实例配置文件"
-    echo "v2node update [version]        - 更新 v2node（不带版本号=最新版；菜单里更新可从版本列表选择或手动输入）"
+    echo "v2node update [version]        - 更新 v2node（不带版本号时在终端里列出版本供选择或手动输入，回车=最新版）"
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看版本信息（管理脚本/已安装/最新）"
@@ -1263,7 +1263,18 @@ if [[ $# > 0 ]]; then
             check_install "$log_name" 0 && log "$log_name" "$log_follow" 0
             ;;
         "config") check_install "$2" 0 && config "$2" 0 ;;
-        "update") check_binary_install 0 && update 0 $2 ;;
+        "update")
+            if check_binary_install 0; then
+                # No version given on a terminal: show the version list like the menu does.
+                # Scripts and pipes (no terminal) keep updating straight to the latest version.
+                if [[ -z "$2" && -t 0 ]]; then
+                    choose_update_version
+                    update 0 "$chosen_version"
+                else
+                    update 0 "$2"
+                fi
+            fi
+            ;;
         "new") new "$2" 0 ;;
         "remove") check_install "$2" 0 && remove "${@:2}" ;;
         "rename") check_install "$2" 0 && rename "$2" "$3" ;;

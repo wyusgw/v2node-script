@@ -952,9 +952,37 @@ install_or_update() {
     fi
 }
 
+# $1: silent(非空=不返回主菜单，供CLI用)。最新版本是即时查询的，不读缓存，网络不通时只显示"查询失败"
 show_v2node_version() {
-    echo -n "v2node 版本："
-    /usr/local/v2node/v2node version
+    local installed=""
+    if [[ -f /usr/local/v2node/v2node ]]; then
+        installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
+    fi
+    echo -e "管理脚本版本: ${green}v${SCRIPT_VERSION}${plain}"
+    echo -e "安装分支:     $(channel_label)"
+    if [[ -z "$installed" ]]; then
+        echo -e "已安装版本:   ${yellow}未安装${plain}"
+    else
+        echo -e "已安装版本:   ${green}${installed}${plain}"
+    fi
+    echo -n "最新版本:     "
+    local latest
+    latest=$(fetch_latest_version)
+    if [[ -z "$latest" ]]; then
+        echo -e "${yellow}查询失败，请检查本机能否连接 Github${plain}"
+    else
+        echo -e "${latest}"
+        local dir="/run"
+        [[ -d "$dir" && -w "$dir" ]] || dir="/tmp"
+        echo "$latest" > "${dir}/.v2node_latest_$(get_channel)" 2>/dev/null
+        if [[ -n "$installed" ]]; then
+            if version_is_newer "$latest" "$installed"; then
+                echo -e "${yellow}有新版本可更新${plain}"
+            else
+                echo -e "${green}已是最新版本${plain}"
+            fi
+        fi
+    fi
     echo ""
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -1081,7 +1109,7 @@ show_usage() {
     echo "v2node update [version]        - 更新 v2node"
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
-    echo "v2node version                 - 查看 v2node 版本"
+    echo "v2node version                 - 查看版本信息（管理脚本/已安装/最新）"
     echo "v2node channel [stable|beta]   - 查看/切换安装分支（不带参数=查看当前分支）"
     echo "v2node update_shell            - 更新管理脚本"
     echo "----------------------------------------------------------"
@@ -1098,9 +1126,10 @@ show_menu() {
   ${green}3.${plain} 更新管理脚本
   ${green}4.${plain} 切换安装分支 [当前: $(channel_label)]
   ${green}5.${plain} 新增 v2node 实例
+  ${green}6.${plain} 查看版本
 ————————————————"
 
-    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 6 开始依序编号，
+    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 7 开始依序编号，
     # 而不是只有一行、靠输入实例名切换焦点——实例数量本来就不多，直接
     # 每个都给一个号码更直觉
     local menu_instances=()
@@ -1114,14 +1143,14 @@ show_menu() {
             menu_instances+=("$(basename "$d")")
         done
     fi
-    local i num_i=6
+    local i num_i=7
     for i in "${menu_instances[@]}"; do
         echo -e "  ${green}${num_i}.${plain} 管理实例 [$(instance_display_name "$i")]"
         num_i=$((num_i + 1))
     done
     echo " "
     show_instance_list
-    local max=$((6 + ${#menu_instances[@]} - 1))
+    local max=$((7 + ${#menu_instances[@]} - 1))
     echo && read -rp "请输入选择 [0-${max}] 或 [实例名]: " num
 
     case "${num}" in
@@ -1131,9 +1160,10 @@ show_menu() {
         3) update_shell ;;
         4) switch_channel ;;
         5) new "" ;;
+        6) show_v2node_version ;;
         *)
-            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 6 && num < 6 + ${#menu_instances[@]} )); then
-                local picked="${menu_instances[$((num - 6))]}"
+            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 7 && num < 7 + ${#menu_instances[@]} )); then
+                local picked="${menu_instances[$((num - 7))]}"
                 check_install "$picked" && instance_submenu "$picked"
             elif [[ "$num" == "default" ]] || [[ -f "$(instance_config_path "$num")" ]]; then
                 local picked=""

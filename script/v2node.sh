@@ -875,7 +875,7 @@ show_version_header() {
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: ${installed}]  [分支: $(channel_label)]"
         local latest
         latest=$(get_latest_version)
-        if [[ -n "$latest" && "${latest#v}" != "${installed#v}" ]]; then
+        if [[ -n "$latest" && "${latest#[vV]}" != "${installed#[vV]}" ]]; then
             echo -e "  ${yellow}发现新版本: v2node ${latest}${plain}，运行 v2node update 更新${plain}"
         fi
     else

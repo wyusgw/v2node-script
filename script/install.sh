@@ -441,20 +441,21 @@ install_v2node() {
             exit 1
         fi
     elif  [[ -z "$version_param" ]] ; then
-        last_version=$(curl -Ls "https://api.github.com/repos/wyusgw/v2node/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 v2node 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 v2node 版本安装${plain}"
-            exit 1
-        fi
-        echo -e "${green}检测到最新版本：${last_version}，开始安装...${plain}"
-        url="https://github.com/wyusgw/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
+        # The latest/download redirect needs no API call, so a rate limited or blocked API cannot stop an install
+        echo -e "${green}开始安装 v2node 最新版${plain}"
+        url="https://github.com/wyusgw/v2node/releases/latest/download/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 v2node 失败，请确保你的服务器能够下载 Github 的文件${plain}"
             exit 1
         fi
     else
-        last_version="v${version_param#v}"
+        # Release tags are written v1.2.3: accept the number with or without the v, keep other tags such as beta as given
+        if [[ "$version_param" =~ ^[vV]?[0-9] ]]; then
+            last_version="v${version_param#[vV]}"
+        else
+            last_version="$version_param"
+        fi
         url="https://github.com/wyusgw/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
@@ -466,6 +467,9 @@ install_v2node() {
     unzip v2node-linux.zip
     rm v2node-linux.zip -f
     chmod +x v2node
+    # Report the version the binary says it is, not the tag it was downloaded under
+    installed_version=$(./v2node version 2>/dev/null | awk '{print $2}')
+    [[ -n "$installed_version" ]] && last_version="$installed_version"
     mkdir /etc/v2node/ -p
     cp geoip.dat /etc/v2node/
     cp geosite.dat /etc/v2node/

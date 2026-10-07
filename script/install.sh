@@ -404,6 +404,17 @@ install_v2node() {
     local svc=$(instance_service_name "$instance")
     local had_binary=false
     [[ -f /usr/local/v2node/v2node ]] && had_binary=true
+    # Updating the default instance keeps its state: it is restarted only if it was running, and
+    # stays enabled at boot only if it was. Fresh installs and new instances start and are enabled.
+    local was_running=true was_enabled=true
+    if [[ -z "$instance" && $had_binary == true && -f "$cfg" ]]; then
+        check_status "$instance" || was_running=false
+        if [[ x"${release}" == x"alpine" ]]; then
+            rc-update show 2>/dev/null | grep -qE "^[[:space:]]*v2node[[:space:]]*\|" || was_enabled=false
+        else
+            [[ x"$(systemctl is-enabled v2node 2>/dev/null)" == x"enabled" ]] || was_enabled=false
+        fi
+    fi
     # earlier versions kept a separate plaintext copy of the panel address and key
     rm -f /etc/v2node/.last_api_host /etc/v2node/.last_api_key
 
@@ -506,13 +517,17 @@ depend() {
 EOF
         chmod +x /etc/init.d/v2node
         if [[ -z "$instance" ]]; then
-            rc-update add v2node default
+            [[ $was_enabled == true ]] && rc-update add v2node default
         else
             # openrc 靠脚本文件名认实例，做一个指到同一份脚本的 symlink
             ln -sf /etc/init.d/v2node "/etc/init.d/$(instance_init_name "$instance")"
             rc-update add "$(instance_init_name "$instance")" default
         fi
-        echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
+        if [[ $was_enabled == true ]]; then
+            echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
+        else
+            echo -e "${green}v2node ${last_version}${plain} 安装完成，开机自启保持关闭"
+        fi
     else
         if [[ -z "$instance" ]]; then
             rm /etc/systemd/system/v2node.service -f
@@ -567,11 +582,15 @@ EOF
         systemctl daemon-reload
         if [[ -z "$instance" ]]; then
             systemctl stop v2node
-            systemctl enable v2node
+            [[ $was_enabled == true ]] && systemctl enable v2node
         else
             systemctl enable "${svc}"
         fi
-        echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
+        if [[ $was_enabled == true ]]; then
+            echo -e "${green}v2node ${last_version}${plain} 安装完成，已设置开机自启"
+        else
+            echo -e "${green}v2node ${last_version}${plain} 安装完成，开机自启保持关闭"
+        fi
     fi
 
     if [[ ! -f "$cfg" ]]; then
@@ -583,16 +602,22 @@ EOF
         else
             first_install=true
         fi
+    elif [[ $was_running == false ]]; then
+        echo -e "${yellow}默认实例更新前未运行，保持停止，下次启动时会用上新版本${plain}"
+        first_install=false
     else
+        # restart rather than start: openrc's start is a no-op for an instance that is already
+        # running, which would leave it on the old binary
         if [[ x"${release}" == x"alpine" ]]; then
-            service $(instance_init_name "$instance") start
+            service $(instance_init_name "$instance") restart
         else
-            systemctl start "${svc}"
+            systemctl restart "${svc}"
         fi
         sleep 2
         check_status "$instance"
+        local rc=$?
         echo -e ""
-        if [[ $? == 0 ]]; then
+        if [[ $rc == 0 ]]; then
             echo -e "${green}v2node 重启成功${plain}"
         else
             echo -e "${red}v2node 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"

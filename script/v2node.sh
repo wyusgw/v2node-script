@@ -287,23 +287,30 @@ update() {
     fi
     bash <(curl -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh) $version
     if [[ $? == 0 ]]; then
-        # Only the default instance is restarted by the update; named instances keep running the old
-        # binary until restarted, so list them
+        # install.sh has already restarted the default instance if it was running. Named
+        # instances keep running the old binary until restarted, so restart the running ones
+        # here the same way; stopped ones stay stopped and pick up the new binary on next start.
         local named=() d
         if [[ -d /etc/v2node/instances ]]; then
             for d in /etc/v2node/instances/*/; do
                 [[ -e "$d" ]] && named+=("$(basename "$d")")
             done
         fi
-        if [[ -f /etc/v2node/config.json && ${#named[@]} -eq 0 ]]; then
-            echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
-        elif [[ -f /etc/v2node/config.json ]]; then
-            echo -e "${green}更新完成，已自动重启默认实例，请使用 v2node log [实例名] 查看运行日志（省略实例名即默认实例）${plain}"
+        if [[ ${#named[@]} -eq 0 ]]; then
+            echo -e "${green}更新完成，请使用 v2node log 查看运行日志${plain}"
         else
-            echo -e "${green}更新完成，请使用 v2node log <实例名> 查看运行日志${plain}"
+            echo -e "${green}更新完成，请使用 v2node log [实例名] 查看运行日志（省略实例名即默认实例）${plain}"
         fi
-        if [[ ${#named[@]} -gt 0 ]]; then
-            echo -e "${yellow}命名实例 [${named[*]}] 需要分别执行 v2node restart <实例名> 才会用上新版本${plain}"
+        local n stopped=()
+        for n in "${named[@]}"; do
+            if check_status "$n"; then
+                restart "$n" silent
+            else
+                stopped+=("$n")
+            fi
+        done
+        if [[ ${#stopped[@]} -gt 0 ]]; then
+            echo -e "${yellow}命名实例 [${stopped[*]}] 当前未运行，未自动启动，下次启动时会用上新版本${plain}"
         fi
         exit
     fi

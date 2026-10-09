@@ -962,7 +962,7 @@ instance_submenu() {
   ${green}4.${plain} 重载配置
 ————————————————
   ${green}5.${plain} 查看服务状态详情
-  ${green}6.${plain} 查看最近日志 (可自定义行数，默认1000行)
+  ${green}6.${plain} 查看最近日志
   ${green}7.${plain} 持续输出日志
 ————————————————
   ${green}8.${plain} 设置开机自启

@@ -659,6 +659,10 @@ log() {
     local name="$1"
     local follow="$2"
     local silent="$3"
+    local lines="$4"
+    if [[ ! "$lines" =~ ^[0-9]+$ ]] || (( lines < 1 )); then
+        lines=1000
+    fi
     if [[ x"${release}" == x"alpine" ]]; then
         echo -e "${red}alpine系统暂不支持日志查看${plain}"
         if [[ -z "$silent" ]]; then before_show_menu; fi
@@ -667,7 +671,7 @@ log() {
     if [[ -n "$follow" ]]; then
         journalctl -u "$(instance_service_name "$name").service" -e --no-pager -f
     else
-        journalctl -u "$(instance_service_name "$name").service" -n 1000 --no-pager
+        journalctl -u "$(instance_service_name "$name").service" -n "$lines" --no-pager
     fi
     if [[ -z "$silent" ]]; then
         before_show_menu
@@ -958,7 +962,7 @@ instance_submenu() {
   ${green}4.${plain} 重载配置
 ————————————————
   ${green}5.${plain} 查看服务状态详情
-  ${green}6.${plain} 查看最近日志 (1000行)
+  ${green}6.${plain} 查看最近日志 (可自定义行数，默认1000行)
   ${green}7.${plain} 持续输出日志
 ————————————————
   ${green}8.${plain} 设置开机自启
@@ -982,7 +986,10 @@ instance_submenu() {
         3) restart "$name" 0 ;;
         4) reload_config "$name" 0 ;;
         5) status "$name" 0 ;;
-        6) log "$name" "" 0 ;;
+        6)
+            read -rp "查看最近多少行日志 [默认: 1000]: " log_lines
+            log "$name" "" 0 "$log_lines"
+            ;;
         7) log "$name" "1" 0 ;;
         8) enable "$name" 0 ;;
         9) disable "$name" 0 ;;
@@ -1290,7 +1297,7 @@ show_usage() {
     echo "v2node status [name]           - 查看实例状态"
     echo "v2node enable [name]           - 设置实例开机自启"
     echo "v2node disable [name]          - 取消实例开机自启"
-    echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
+    echo "v2node log [name] [-n 行数] [-f] - 查看实例日志(默认最后1000行，-n 自定义行数，-f 持续跟随)"
     echo "v2node config [name]           - 编辑实例配置并重启"
     echo "v2node reload [name]           - 重载实例配置（不重启进程）"
     echo "v2node quick [name]            - 快速配置实例（面板地址/节点ID/密钥/节点类型）"
@@ -1385,14 +1392,20 @@ if [[ $# > 0 ]]; then
         "log")
             log_follow=""
             log_name=""
-            for log_arg in "$2" "$3"; do
+            log_lines=""
+            log_args=("${@:2}")
+            for ((log_i = 0; log_i < ${#log_args[@]}; log_i++)); do
+                log_arg="${log_args[$log_i]}"
                 if [[ "$log_arg" == "-f" ]]; then
                     log_follow="1"
+                elif [[ "$log_arg" == "-n" ]]; then
+                    log_i=$((log_i + 1))
+                    log_lines="${log_args[$log_i]}"
                 elif [[ -n "$log_arg" ]]; then
                     log_name="$log_arg"
                 fi
             done
-            check_install "$log_name" 0 && log "$log_name" "$log_follow" 0
+            check_install "$log_name" 0 && log "$log_name" "$log_follow" 0 "$log_lines"
             ;;
         "config") check_install "$2" 0 && config "$2" 0 ;;
         "reload") check_install "$2" 0 && reload_config "$2" 0 ;;

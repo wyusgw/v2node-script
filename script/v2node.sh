@@ -439,6 +439,88 @@ uninstall() {
     fi
 }
 
+# 重载配置：程序监听配置文件的写入事件，原地重写一次内容即可触发重载（约 5 秒后生效，
+# 10 秒内的重复触发会被合并），不需要重启进程
+reload_config() {
+    local name="$1"
+    local silent="$2"
+    local cfg=$(instance_config_path "$name")
+    if [[ ! -f "$cfg" ]]; then
+        echo -e "${red}$(instance_label "$name") 还没有配置文件${plain}"
+    else
+        local tmp
+        tmp=$(mktemp) && cat "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
+        rm -f "$tmp"
+        echo -e "${green}已触发$(instance_label "$name")重载配置，约 5 秒后生效，可用 v2node log${name:+ $name} 查看${plain}"
+    fi
+    if [[ -z "$silent" ]]; then before_show_menu; fi
+}
+
+# 快速配置：只改面板地址、节点ID、密钥和节点类型，以当前值作默认值，直接回车即保持不变；
+# 配置文件里其他内容（日志、超时等）原样保留，改完重启该实例
+quick_config() {
+    local name="$1"
+    local silent="$2"
+    local cfg=$(instance_config_path "$name")
+    if [[ ! -f "$cfg" ]]; then
+        echo -e "${red}$(instance_label "$name") 还没有配置文件${plain}"
+        [[ -n "$name" ]] && echo -e "${yellow}请先执行: v2node new ${name}${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
+    fi
+    if (( $(grep -c '"NodeID"' "$cfg") != 1 )); then
+        echo -e "${red}$(instance_label "$name") 的配置里有多个节点，快速配置只支持单节点，请用「编辑配置」修改${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
+    fi
+
+    local cur_host cur_id cur_key cur_type
+    cur_host=$(sed -n 's/.*"ApiHost"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -1)
+    cur_id=$(sed -n 's/.*"NodeID"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$cfg" | head -1)
+    cur_key=$(sed -n 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -1)
+    cur_type=$(sed -n 's/.*"NodeType"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" | head -1)
+    cur_type=${cur_type:-v2node}
+
+    local api_host node_id api_key node_type
+    read -rp "面板API地址 [当前: ${cur_host}]: " api_host
+    api_host=${api_host:-$cur_host}
+    read -rp "节点ID [当前: ${cur_id}]: " node_id
+    node_id=${node_id:-$cur_id}
+    read -rp "节点通讯密钥 [当前: $(mask_key "$cur_key")]: " api_key
+    api_key=${api_key:-$cur_key}
+    node_type=$(choose_node_type "$cur_type")
+
+    if [[ ! "$node_id" =~ ^[0-9]+$ ]]; then
+        echo -e "${red}节点ID必须是数字${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
+    fi
+    if [[ "$api_host$api_key" == *'"'* || "$api_host$api_key" == *'\'* ]]; then
+        echo -e "${red}面板地址和密钥不能包含双引号或反斜杠${plain}"
+        if [[ -z "$silent" ]]; then before_show_menu; fi
+        return 1
+    fi
+
+    local e_host e_key
+    e_host=$(printf '%s' "$api_host" | sed 's/[\\&|]/\\&/g')
+    e_key=$(printf '%s' "$api_key" | sed 's/[\\&|]/\\&/g')
+    sed -i \
+        -e "s|\(\"ApiHost\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"${e_host}\"|" \
+        -e "s|\(\"NodeID\"[[:space:]]*:[[:space:]]*\)[0-9]*|\1${node_id}|" \
+        -e "s|\(\"ApiKey\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"${e_key}\"|" \
+        "$cfg"
+    if grep -q '"NodeType"' "$cfg"; then
+        sed -i "s|\(\"NodeType\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"${node_type}\"|" "$cfg"
+    else
+        local tmp
+        tmp=$(mktemp) && awk -v t="$node_type" '{ print } /"NodeID"/ && !done { print "            \"NodeType\": \"" t "\","; done = 1 }' "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
+        rm -f "$tmp"
+    fi
+    echo -e "${green}$(instance_label "$name") 配置已更新，正在重启${plain}"
+    restart "$name" 0
+    if [[ -z "$silent" ]]; then before_show_menu; fi
+}
+
 # 卸载前通知面板该配置里的节点已卸载，面板不可达或旧版本没有该命令时忽略
 unregister_config() {
     [[ -f "$1" && -x /usr/local/v2node/v2node ]] || return 0
@@ -852,37 +934,61 @@ rename() {
 # 重命名/移除，要移除默认实例请走「完全卸载」
 instance_submenu() {
     local name="$1"
-    local max=8
+    local max=13
+    local status_text enable_text
+    check_status "$name"
+    case $? in
+        0) status_text="${green}已运行${plain}" ;;
+        1) status_text="${yellow}未运行${plain}" ;;
+        *) status_text="${red}未安装${plain}" ;;
+    esac
+    check_enabled "$name"
+    if [[ $? == 0 ]]; then enable_text="${green}是${plain}"; else enable_text="${red}否${plain}"; fi
     echo -e "
-  ${green}管理实例 [$(instance_display_name "$name")]${plain}
+  ${green}v2node [$(instance_display_name "$name")] 管理${plain}
+
+  状态: ${status_text}    自启: ${enable_text}
+  配置: $(instance_config_path "$name")
+
+  ${green}0.${plain} 返回上级
 ————————————————
   ${green}1.${plain} 启动
   ${green}2.${plain} 停止
   ${green}3.${plain} 重启
-  ${green}4.${plain} 查看状态
-  ${green}5.${plain} 查看日志
-  ${green}6.${plain} 设置开机自启
-  ${green}7.${plain} 取消开机自启
-  ${green}8.${plain} 编辑配置"
+  ${green}4.${plain} 重载配置
+————————————————
+  ${green}5.${plain} 查看服务状态详情
+  ${green}6.${plain} 查看最近日志 (1000行)
+  ${green}7.${plain} 持续输出日志
+————————————————
+  ${green}8.${plain} 设置开机自启
+  ${green}9.${plain} 取消开机自启
+————————————————
+  ${green}10.${plain} 快速配置
+  ${green}11.${plain} 编辑配置"
     if [[ -n "$name" ]]; then
-        max=10
-        echo -e "  ${green}9.${plain} 重命名此实例
-  ${green}10.${plain} 移除此实例"
+        echo -e "————————————————
+  ${green}12.${plain} 重命名此实例
+  ${green}13.${plain} 移除此实例"
+    else
+        max=11
     fi
-    echo -e "  ${green}0.${plain} 返回主菜单
- "
+    echo " "
     read -rp "请输入选择 [0-${max}]: " iop
     case "$iop" in
         0) return ;;
         1) start "$name" 0 ;;
         2) stop "$name" 0 ;;
         3) restart "$name" 0 ;;
-        4) status "$name" 0 ;;
-        5) log "$name" "" 0 ;;
-        6) enable "$name" 0 ;;
-        7) disable "$name" 0 ;;
-        8) config "$name" 0 ;;
-        9)
+        4) reload_config "$name" 0 ;;
+        5) status "$name" 0 ;;
+        6) log "$name" "" 0 ;;
+        7) log "$name" "1" 0 ;;
+        8) enable "$name" 0 ;;
+        9) disable "$name" 0 ;;
+        10) quick_config "$name" 0 ;;
+        11) config "$name" 0 ;;
+        12)
             if [[ -n "$name" ]]; then
                 read -rp "新名字: " new_name
                 rename "$name" "$new_name"
@@ -890,7 +996,7 @@ instance_submenu() {
                 echo -e "${red}默认实例不支持重命名${plain}"
             fi
             ;;
-        10)
+        13)
             if [[ -n "$name" ]]; then
                 remove "$name"
             else
@@ -1074,10 +1180,13 @@ choose_node_type() {
         echo "  $i) $opt" >&2
         i=$((i+1))
     done
-    local choice
+    local choice default_idx=1 j
+    for j in "${!values[@]}"; do
+        [[ "${values[$j]}" == "$1" ]] && default_idx=$((j+1))
+    done
     while true; do
-        read -rp "输入序号 [默认: 1) auto]: " choice
-        choice=${choice:-1}
+        read -rp "输入序号 [默认: ${default_idx}) ${values[$((default_idx-1))]}]: " choice
+        choice=${choice:-$default_idx}
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#values[@]} )); then
             echo "${values[$((choice-1))]}"
             return 0
@@ -1091,9 +1200,10 @@ generate_v2node_config() {
         local node_id="$2"
         local api_key="$3"
         local node_type="${4:-v2node}"
+        local instance="$5"
 
-        mkdir -p /etc/v2node >/dev/null 2>&1
-        cat > /etc/v2node/config.json <<EOF
+        mkdir -p "$(instance_dir "$instance")" >/dev/null 2>&1
+        cat > "$(instance_config_path "$instance")" <<EOF
 {
     "Log": {
         "Level": "warning",
@@ -1111,19 +1221,20 @@ generate_v2node_config() {
     ]
 }
 EOF
-        echo -e "${green}V2node 配置文件生成完成,正在重新启动服务${plain}"
+        echo -e "${green}$(instance_label "$instance") 配置文件生成完成,正在重新启动服务${plain}"
         if [[ x"${release}" == x"alpine" ]]; then
-            service v2node restart
+            service $(instance_init_name "$instance") restart
         else
-            systemctl restart v2node
+            systemctl restart "$(instance_service_name "$instance")"
         fi
         sleep 2
-        check_status
+        check_status "$instance"
+        local started=$?
         echo -e ""
-        if [[ $? == 0 ]]; then
-            echo -e "${green}v2node 重启成功${plain}"
+        if [[ $started == 0 ]]; then
+            echo -e "${green}$(instance_label "$instance") 重启成功${plain}"
         else
-            echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
+            echo -e "${red}$(instance_label "$instance") 可能启动失败，请使用 v2node log${instance:+ $instance} 查看日志信息${plain}"
         fi
 }
 
@@ -1181,6 +1292,8 @@ show_usage() {
     echo "v2node disable [name]          - 取消实例开机自启"
     echo "v2node log [name] [-f]         - 查看实例日志(默认最后1000行，-f 持续跟随)"
     echo "v2node config [name]           - 编辑实例配置并重启"
+    echo "v2node reload [name]           - 重载实例配置（不重启进程）"
+    echo "v2node quick [name]            - 快速配置实例（面板地址/节点ID/密钥/节点类型）"
     echo "v2node generate                - 生成默认实例配置文件"
     echo "v2node update [version]        - 更新 v2node（不带版本号时在终端里列出版本供选择或手动输入，回车=最新版）"
     echo "v2node install                 - 安装 v2node"
@@ -1282,6 +1395,8 @@ if [[ $# > 0 ]]; then
             check_install "$log_name" 0 && log "$log_name" "$log_follow" 0
             ;;
         "config") check_install "$2" 0 && config "$2" 0 ;;
+        "reload") check_install "$2" 0 && reload_config "$2" 0 ;;
+        "quick") check_install "$2" 0 && quick_config "$2" 0 ;;
         "update")
             if check_binary_install 0; then
                 # No version given on a terminal: show the version list like the menu does.

@@ -700,7 +700,25 @@ if [[ x"${release}" != x"alpine" ]]; then
     fi
 fi
 
+# 面板给的安装命令在判断不出本机已有别的节点时不带 --instance；这时在已有默认实例上装另一个
+# 节点ID只会走更新流程，不会生成新节点的配置。节点ID不在任何已有配置里时，自动给它单独建实例
+auto_instance_name() {
+    [[ -z "$INSTANCE_ARG" && -n "$API_HOST_ARG" && -n "$API_KEY_ARG" ]] || return 0
+    [[ "$NODE_ID_ARG" =~ ^[0-9]+$ ]] || return 0
+    [[ -f /etc/v2node/config.json ]] || return 0
+    local f
+    for f in /etc/v2node/config.json /etc/v2node/instances/*/config.json; do
+        [[ -f "$f" ]] || continue
+        if grep -Eq "\"NodeID\"[[:space:]]*:[[:space:]]*${NODE_ID_ARG}([^0-9]|$)" "$f"; then
+            return 0
+        fi
+    done
+    INSTANCE_ARG="node${NODE_ID_ARG}"
+    echo -e "${yellow}默认实例已存在且不包含节点 ${NODE_ID_ARG}，自动创建实例 [${INSTANCE_ARG}]${plain}"
+}
+
 parse_args "$@"
+auto_instance_name
 echo -e "${green}开始安装${plain}"
 install_base
 install_v2node "$VERSION_ARG"

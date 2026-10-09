@@ -788,7 +788,7 @@ remove() {
             systemctl reset-failed "$(instance_service_name "$name")" 2>/dev/null
         fi
         rm "$(instance_dir "$name")" -rf
-        echo -e "${green}实例 [${name}] 已移除（共用的 v2node 主程序未受影响）${plain}"
+        echo -e "${green}实例 [${name}] 已移除${plain}"
     done
 }
 

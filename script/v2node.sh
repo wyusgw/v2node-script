@@ -423,10 +423,6 @@ uninstall() {
         systemctl daemon-reload
         systemctl reset-failed
     fi
-    local cfg
-    for cfg in /etc/v2node/config.json /etc/v2node/instances/*/config.json; do
-        unregister_config "$cfg"
-    done
     rm /etc/v2node/ -rf
     rm /usr/local/v2node/ -rf
 
@@ -519,13 +515,6 @@ quick_config() {
     echo -e "${green}$(instance_label "$name") 配置已更新，正在重启${plain}"
     restart "$name" 0
     if [[ -z "$silent" ]]; then before_show_menu; fi
-}
-
-# 卸载前通知面板该配置里的节点已卸载，面板不可达或旧版本没有该命令时忽略
-unregister_config() {
-    [[ -f "$1" && -x /usr/local/v2node/v2node ]] || return 0
-    /usr/local/v2node/v2node unregister -c "$1" >/dev/null 2>&1
-    return 0
 }
 
 # 以下生命周期指令统一格式: FUNC [实例名] [silent]
@@ -884,7 +873,6 @@ remove() {
             systemctl disable "$(instance_service_name "$name")" 2>/dev/null
             systemctl reset-failed "$(instance_service_name "$name")" 2>/dev/null
         fi
-        unregister_config "$(instance_dir "$name")/config.json"
         rm "$(instance_dir "$name")" -rf
         echo -e "${green}实例 [${name}] 已移除${plain}"
     done

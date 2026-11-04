@@ -222,21 +222,67 @@ install() {
     fi
 }
 
-# Release versions, newest first, one per line. The releases atom feed is not rate limited,
-# so it is tried first and the API is only the fallback.
-list_release_versions() {
-    local list
-    list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##' | grep -E '^[vV]?[0-9]' | awk '!seen[$0]++' | head -15)
+# All release tags, newest first, one per line. The releases atom feed is not rate limited,
+# so it is tried first and the API is only the fallback. Feed links may encode + as %2B.
+# With "all" the API comes first: the feed holds only the newest few releases.
+list_release_tags() {
+    local list="" api="https://api.github.com/repos/wyusgw/v2node/releases?per_page=100"
+    local feed="https://github.com/wyusgw/v2node/releases.atom"
+    if [[ "$1" == "all" ]]; then
+        list=$(curl -Ls --connect-timeout 3 --max-time 8 "$api" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
     if [[ -z "$list" ]]; then
-        list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://api.github.com/repos/wyusgw/v2node/releases?per_page=15" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '^[vV]?[0-9]')
+        list=$(curl -Ls --connect-timeout 3 --max-time 6 "$feed" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##; s/%2[Bb]/+/g' | awk '!seen[$0]++')
+    fi
+    if [[ -z "$list" && "$1" != "all" ]]; then
+        list=$(curl -Ls --connect-timeout 3 --max-time 6 "$api" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     fi
     echo "$list"
 }
 
+# Versions of the current channel, newest first, one per line. The stable channel lists plain
+# release versions (v1.2.3). The beta channel lists the rolling dev build "beta" first, then
+# test releases: tags with a suffix after the version number, such as v0.1.6+beta.
+# $1: "all" to list every version instead of the newest 15. $2: keyword to keep only matches.
+list_release_versions() {
+    local scope="$1" keyword="$2" tags list
+    tags=$(list_release_tags "$scope")
+    if [[ "$(get_channel)" == "beta" ]]; then
+        list=$(echo "beta"; echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$')
+    else
+        list=$(echo "$tags" | grep -E '^[vV]?[0-9]+(\.[0-9]+)*$')
+    fi
+    list=$(echo "$list" | awk 'NF && !seen[$0]++')
+    if [[ -n "$keyword" ]]; then
+        list=$(echo "$list" | grep -iF -- "$keyword")
+    fi
+    if [[ "$scope" != "all" ]]; then
+        list=$(echo "$list" | head -15)
+    fi
+    [[ -n "$list" ]] && echo "$list"
+}
+
+# Print a numbered version list. $1: installed version, rest: versions.
+print_version_list() {
+    local installed="$1" i mark
+    shift
+    local versions=("$@")
+    for i in "${!versions[@]}"; do
+        mark=""
+        [[ $i -eq 0 && -z "$searching" ]] && mark="  最新"
+        if [[ -n "$installed" && ( "${versions[$i]#[vV]}" == "${installed#[vV]}" || ( "${versions[$i]}" == "beta" && "$installed" == beta-* ) ) ]]; then
+            mark="${mark}  ${green}<- 当前版本${plain}"
+        fi
+        echo -e "  $((i + 1)). ${versions[$i]}${mark}"
+    done
+}
+
 # Sets $chosen_version: empty means the latest version of the current channel.
-# Accepts a number from the list, a typed version (with or without v), or Enter for the latest.
+# Accepts a number from the list, a typed version (with or without v), Enter for the latest,
+# or /keyword to search every version of the current channel (/ alone lists them all).
 choose_update_version() {
     chosen_version=""
+    searching=""
     local installed="" list=() line
     if [[ -f /usr/local/v2node/v2node ]]; then
         installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
@@ -248,20 +294,40 @@ choose_update_version() {
     if [[ ${#list[@]} -eq 0 ]]; then
         echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
     else
-        echo -e "可更新的版本（当前: ${installed:-未安装}）:"
-        local i mark
-        for i in "${!list[@]}"; do
-            mark=""
-            [[ $i -eq 0 ]] && mark="  最新"
-            [[ -n "$installed" && "${list[$i]#[vV]}" == "${installed#[vV]}" ]] && mark="${mark}  ${green}<- 当前版本${plain}"
-            echo -e "  $((i + 1)). ${list[$i]}${mark}"
-        done
+        echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
+        if [[ "$(get_channel)" == "beta" ]]; then
+            echo -e "${yellow}beta 是 dev 分支的滚动构建；要安装正式版请先切换到稳定版分支${plain}"
+        fi
+        print_version_list "$installed" "${list[@]}"
     fi
-    local input
+    echo -e "提示: 输入 /关键词 搜索$(channel_label)的全部版本（如 /0.1），只输入 / 列出全部"
+    local input keyword found
     while true; do
-        read -rp "输入序号或版本号直接回车(最新版): " input
+        read -rp "输入序号、版本号或 /关键词，直接回车(最新版): " input
         if [[ -z "$input" ]]; then
             return 0
+        elif [[ "$input" == /* ]]; then
+            keyword="${input#/}"
+            keyword="${keyword#"${keyword%%[![:space:]]*}"}"
+            keyword="${keyword%"${keyword##*[![:space:]]}"}"
+            echo -e "正在搜索..."
+            found=()
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && found+=("$line")
+            done < <(list_release_versions all "$keyword")
+            if [[ ${#found[@]} -eq 0 ]]; then
+                echo -e "${yellow}$(channel_label)没有${keyword:+包含 \"${keyword}\" 的}版本，请换个关键词或直接输入版本号${plain}"
+                continue
+            fi
+            list=("${found[@]}")
+            searching=1
+            if [[ -n "$keyword" ]]; then
+                echo -e "$(channel_label)中包含 \"${keyword}\" 的版本（共 ${#list[@]} 个）:"
+            else
+                echo -e "$(channel_label)全部版本（共 ${#list[@]} 个）:"
+            fi
+            print_version_list "$installed" "${list[@]}"
+            searching=""
         elif [[ "$input" =~ ^[0-9]+$ ]]; then
             # a bare number is a list position, never a version
             if (( input >= 1 && input <= ${#list[@]} )); then

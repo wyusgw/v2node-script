@@ -241,14 +241,14 @@ list_release_tags() {
 }
 
 # Versions of the current channel, newest first, one per line. The stable channel lists plain
-# release versions (v1.2.3). The beta channel lists the rolling dev build "beta" first, then
-# test releases: tags with a suffix after the version number, such as v0.1.6+beta.
+# release versions (v1.2.3); the beta channel lists test releases, tags with a suffix after
+# the version number such as v0.1.6+beta.
 # $1: "all" to list every version instead of the newest 15. $2: keyword to keep only matches.
 list_release_versions() {
     local scope="$1" keyword="$2" tags list
     tags=$(list_release_tags "$scope")
     if [[ "$(get_channel)" == "beta" ]]; then
-        list=$(echo "beta"; echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$')
+        list=$(echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$')
     else
         list=$(echo "$tags" | grep -E '^[vV]?[0-9]+(\.[0-9]+)*$')
     fi
@@ -262,24 +262,29 @@ list_release_versions() {
     [[ -n "$list" ]] && echo "$list"
 }
 
-# Print a numbered version list. $1: installed version, rest: versions.
+# Print a numbered version list. $1: installed version, rest: versions. The first entry is
+# marked as the newest only when an update is available, i.e. it is not the installed version.
 print_version_list() {
-    local installed="$1" i mark
+    local installed="$1" i mark label
     shift
     local versions=("$@")
     for i in "${!versions[@]}"; do
+        label="${versions[$i]}"
         mark=""
-        [[ $i -eq 0 && -z "$searching" ]] && mark="  最新"
-        if [[ -n "$installed" && ( "${versions[$i]#[vV]}" == "${installed#[vV]}" || ( "${versions[$i]}" == "beta" && "$installed" == beta-* ) ) ]]; then
-            mark="${mark}  ${green}<- 当前版本${plain}"
+        if [[ -n "$installed" && "${label#[vV]}" == "${installed#[vV]}" ]]; then
+            mark="  ${green}<- 当前版本${plain}"
+        elif [[ $i -eq 0 && -z "$searching" ]]; then
+            # The newest version, marked only when it is not the installed one
+            mark="  <- 最新"
         fi
-        echo -e "  $((i + 1)). ${versions[$i]}${mark}"
+        echo -e "  $((i + 1)). ${label}${mark}"
     done
 }
 
 # Sets $chosen_version: empty means the latest version of the current channel.
-# Accepts a number from the list, a typed version (with or without v), Enter for the latest,
-# or /keyword to search every version of the current channel (/ alone lists them all).
+# Accepts a number from the list, Enter for the latest, or text to search every version of the
+# current channel (a leading / is optional; / alone lists them all). Typed text is always a
+# search, so a version is always picked from a list by its number.
 choose_update_version() {
     chosen_version=""
     searching=""
@@ -294,19 +299,21 @@ choose_update_version() {
     if [[ ${#list[@]} -eq 0 ]]; then
         echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
     else
-        echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
-        if [[ "$(get_channel)" == "beta" ]]; then
-            echo -e "${yellow}beta 是 dev 分支的滚动构建；要安装正式版请先切换到稳定版分支${plain}"
-        fi
+        echo -e "$(channel_label)可更新的版本(当前: ${installed:-未安装})"
         print_version_list "$installed" "${list[@]}"
     fi
-    echo -e "提示: 输入 /关键词 搜索$(channel_label)的全部版本（如 /0.1），只输入 / 列出全部"
-    local input keyword found
+    echo -e "提示: 输入关键词搜索$(channel_label)的全部版本(如0.1)只输入 / 列出全部"
+    local input keyword found newest="${list[0]}"
     while true; do
-        read -rp "输入序号、版本号或 /关键词，直接回车(最新版): " input
+        read -rp "输入序号或关键词搜索直接回车(最新版): " input
         if [[ -z "$input" ]]; then
+            # The newest test release; the stable channel's latest needs no version.
+            if [[ "$(get_channel)" == "beta" && -n "$newest" ]]; then
+                chosen_version="$newest"
+                break
+            fi
             return 0
-        elif [[ "$input" == /* ]]; then
+        elif [[ ! "$input" =~ ^[0-9]+$ ]]; then
             keyword="${input#/}"
             keyword="${keyword#"${keyword%%[![:space:]]*}"}"
             keyword="${keyword%"${keyword##*[![:space:]]}"}"
@@ -316,7 +323,7 @@ choose_update_version() {
                 [[ -n "$line" ]] && found+=("$line")
             done < <(list_release_versions all "$keyword")
             if [[ ${#found[@]} -eq 0 ]]; then
-                echo -e "${yellow}$(channel_label)没有${keyword:+包含 \"${keyword}\" 的}版本，请换个关键词或直接输入版本号${plain}"
+                echo -e "${yellow}$(channel_label)没有${keyword:+包含 \"${keyword}\" 的}版本，请换个关键词${plain}"
                 continue
             fi
             list=("${found[@]}")
@@ -335,9 +342,6 @@ choose_update_version() {
                 break
             fi
             echo -e "${red}序号超出范围，请重新输入${plain}"
-        else
-            chosen_version="$input"
-            break
         fi
     done
     echo -e "将安装版本: ${green}${chosen_version:-最新版}${plain}"
@@ -1074,8 +1078,7 @@ instance_submenu() {
 fetch_latest_version() {
     local latest
     if [[ "$(get_channel)" == "beta" ]]; then
-        latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/git/refs/tags/beta" 2>/dev/null | grep '"sha":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' | cut -c1-7)
-        [[ -n "$latest" ]] && latest="beta-${latest}"
+        latest=$(list_release_versions | head -1)
     else
         latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ -z "$latest" ]]; then
@@ -1356,7 +1359,7 @@ show_usage() {
     echo "v2node reload [name]           - 重载实例配置（不重启进程）"
     echo "v2node quick [name]            - 快速配置实例（面板地址/节点ID/密钥/节点类型）"
     echo "v2node generate                - 生成默认实例配置文件"
-    echo "v2node update [version]        - 更新 v2node（不带版本号时在终端里列出版本供选择或手动输入，回车=最新版）"
+    echo "v2node update [version]        - 更新 v2node（不带版本号时列出当前分支的版本，输入序号选择或关键词搜索，回车=最新版）"
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看版本信息（管理脚本/已安装/最新）"

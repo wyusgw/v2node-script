@@ -241,14 +241,14 @@ list_release_tags() {
 }
 
 # Versions of the current channel, newest first, one per line. The stable channel lists plain
-# release versions (v1.2.3). The beta channel lists the rolling dev build "beta" first, then
-# test releases: tags with a suffix after the version number, such as v0.1.6+beta.
+# release versions (v1.2.3); the beta channel lists test releases, tags with a suffix after
+# the version number such as v0.1.6+beta.
 # $1: "all" to list every version instead of the newest 15. $2: keyword to keep only matches.
 list_release_versions() {
     local scope="$1" keyword="$2" tags list
     tags=$(list_release_tags "$scope")
     if [[ "$(get_channel)" == "beta" ]]; then
-        list=$(echo "beta"; echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$')
+        list=$(echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$')
     else
         list=$(echo "$tags" | grep -E '^[vV]?[0-9]+(\.[0-9]+)*$')
     fi
@@ -262,21 +262,13 @@ list_release_versions() {
     [[ -n "$list" ]] && echo "$list"
 }
 
-# Print a numbered version list. $1: installed version, rest: versions. The rolling build is
-# listed by its real version, beta-<commit>, when the release notes give it.
+# Print a numbered version list. $1: installed version, rest: versions.
 print_version_list() {
-    local installed="$1" i mark label beta_label=""
+    local installed="$1" i mark label
     shift
     local versions=("$@")
     for i in "${!versions[@]}"; do
-        if [[ "${versions[$i]}" == "beta" && -z "$beta_label" ]]; then
-            beta_label=$(fetch_beta_build_version)
-            [[ -z "$beta_label" ]] && beta_label="beta"
-        fi
-    done
-    for i in "${!versions[@]}"; do
         label="${versions[$i]}"
-        [[ "$label" == "beta" ]] && label="$beta_label"
         mark=""
         [[ $i -eq 0 && -z "$searching" ]] && mark="  最新"
         if [[ -n "$installed" && "${label#[vV]}" == "${installed#[vV]}" ]]; then
@@ -305,16 +297,18 @@ choose_update_version() {
         echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
     else
         echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
-        if [[ "$(get_channel)" == "beta" ]]; then
-            echo -e "${yellow}beta 是 dev 分支的滚动构建；要安装正式版请先切换到稳定版分支${plain}"
-        fi
         print_version_list "$installed" "${list[@]}"
     fi
     echo -e "提示: 输入关键词搜索$(channel_label)的全部版本（如 0.1），只输入 / 列出全部"
-    local input keyword found
+    local input keyword found newest="${list[0]}"
     while true; do
         read -rp "输入序号或关键词搜索，直接回车(最新版): " input
         if [[ -z "$input" ]]; then
+            # The newest test release; the stable channel's latest needs no version.
+            if [[ "$(get_channel)" == "beta" && -n "$newest" ]]; then
+                chosen_version="$newest"
+                break
+            fi
             return 0
         elif [[ ! "$input" =~ ^[0-9]+$ ]]; then
             keyword="${input#/}"
@@ -347,12 +341,7 @@ choose_update_version() {
             echo -e "${red}序号超出范围，请重新输入${plain}"
         fi
     done
-    local shown="$chosen_version"
-    if [[ "$shown" == "beta" ]]; then
-        shown=$(fetch_beta_build_version)
-        [[ -z "$shown" ]] && shown="beta"
-    fi
-    echo -e "将安装版本: ${green}${shown:-最新版}${plain}"
+    echo -e "将安装版本: ${green}${chosen_version:-最新版}${plain}"
 }
 
 update() {
@@ -1081,24 +1070,12 @@ instance_submenu() {
     before_show_menu
 }
 
-# Version of the rolling beta build, beta-<commit>, as `v2node version` reports it. The build
-# writes its commit into the beta release notes; the beta tag itself does not move with
-# each build. Read from the releases feed first, which is not rate limited, then the API.
-fetch_beta_build_version() {
-    local sha
-    sha=$(curl -Ls --connect-timeout 2 --max-time 4 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | awk 'BEGIN{RS="</entry>"} /releases\/tag\/beta"/' | grep -oE 'commit [0-9a-f]{7,40}' | head -1 | awk '{print $2}')
-    if [[ -z "$sha" ]]; then
-        sha=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/releases/tags/beta" 2>/dev/null | grep '"body":' | grep -oE 'commit [0-9a-f]{7,40}' | head -1 | awk '{print $2}')
-    fi
-    [[ -n "$sha" ]] && echo "beta-${sha:0:7}"
-}
-
 # Look up the latest published version with short timeouts so an unreachable GitHub cannot hang the menu.
 # The releases page redirect is the fallback when the API is rate limited or blocked.
 fetch_latest_version() {
     local latest
     if [[ "$(get_channel)" == "beta" ]]; then
-        latest=$(fetch_beta_build_version)
+        latest=$(list_release_versions | head -1)
     else
         latest=$(curl -Ls --connect-timeout 2 --max-time 4 "https://api.github.com/repos/wyusgw/v2node/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ -z "$latest" ]]; then

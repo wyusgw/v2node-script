@@ -7,7 +7,7 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -1147,8 +1147,9 @@ version_is_newer() {
     return 1
 }
 
-# True when the main copy of this script on GitHub differs from the installed /usr/bin/v2node.
-# SCRIPT_VERSION is not bumped for every change, so the files are compared by checksum. The
+# True when the main copy of this script on GitHub differs from the installed /usr/bin/v2node,
+# printing the main copy's SCRIPT_VERSION (empty if it has none). The files are compared by
+# checksum, so a change whose SCRIPT_VERSION was not bumped is still noticed. The
 # remote checksum is cached for 30 minutes, and a failed download waits 5 minutes before the
 # next try, so an unreachable GitHub costs a few seconds at most once per 5 minutes.
 script_has_update() {
@@ -1164,7 +1165,11 @@ script_has_update() {
             curl -Ls --connect-timeout 2 --max-time 6 -o "$tmp" "https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/v2node.sh" 2>/dev/null
             # A real copy starts with the shebang; anything else is an error page or a cut download
             if [[ "$(head -c 2 "$tmp" 2>/dev/null)" == "#!" && $(wc -c < "$tmp") -gt 1000 ]]; then
-                sha256sum "$tmp" | awk '{print $1}' > "${cache}.tmp" && mv -f "${cache}.tmp" "$cache"
+                # line 1: checksum, line 2: the copy's SCRIPT_VERSION
+                {
+                    sha256sum "$tmp" | awk '{print $1}'
+                    grep -m1 '^SCRIPT_VERSION=' "$tmp" | sed -E 's/^SCRIPT_VERSION="?([^"]*)"?.*/\1/'
+                } > "${cache}.tmp" && mv -f "${cache}.tmp" "$cache"
                 rm -f "$fail"
             else
                 touch "$fail" 2>/dev/null
@@ -1173,7 +1178,8 @@ script_has_update() {
         fi
     fi
     [[ -s "$cache" ]] || return 1
-    [[ "$(cat "$cache")" != "$(sha256sum /usr/bin/v2node | awk '{print $1}')" ]]
+    [[ "$(head -1 "$cache")" != "$(sha256sum /usr/bin/v2node | awk '{print $1}')" ]] || return 1
+    sed -n 2p "$cache"
 }
 
 # 主菜单顶部的版本信息行，实时查 GitHub 最新版本、有更新就提示
@@ -1192,8 +1198,14 @@ show_version_header() {
     else
         echo -e "  ${green}v2node 管理脚本 v${SCRIPT_VERSION}${plain}  [v2node: 未安装]  [分支: $(channel_label)]"
     fi
-    if script_has_update; then
-        echo -e "  ${yellow}发现管理脚本新版本，选 3 更新管理脚本${plain}"
+    local script_latest
+    if script_latest=$(script_has_update); then
+        # Show the number only when it is a newer one; a change without a bump shows none
+        if [[ -n "$script_latest" && "$script_latest" != "$SCRIPT_VERSION" ]]; then
+            echo -e "  ${yellow}发现管理脚本新版本: v${script_latest}，选 3 更新管理脚本${plain}"
+        else
+            echo -e "  ${yellow}发现管理脚本新版本，选 3 更新管理脚本${plain}"
+        fi
     fi
 }
 

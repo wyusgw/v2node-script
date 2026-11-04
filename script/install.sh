@@ -397,6 +397,17 @@ EOF
         fi
 }
 
+# Newest test release tag, empty when none is found. The releases feed is not rate limited,
+# so it is tried first; feed links may encode + as %2B.
+latest_test_release() {
+    local tags
+    tags=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##; s/%2[Bb]/+/g')
+    if [[ -z "$tags" ]]; then
+        tags=$(curl -Ls --connect-timeout 3 --max-time 6 "https://api.github.com/repos/wyusgw/v2node/releases?per_page=30" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    fi
+    echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$' | head -1
+}
+
 install_v2node() {
     local version_param="$1"
     local instance="$INSTANCE_ARG"
@@ -444,8 +455,17 @@ install_v2node() {
 
     if [[ -z "$version_param" && "$channel" == "beta" ]]; then
         echo -e "${yellow}当前安装分支: 测试版 (dev分支滚动构建可能不稳定)${plain}"
-        last_version="beta"
-        url="https://github.com/wyusgw/v2node/releases/download/beta/v2node-linux-${arch}.zip"
+        # The newest test release (a tag with a suffix after the version number, such as
+        # v0.1.7+beta), the same one the management script lists first. The rolling dev build
+        # is only the fallback when no test release can be found.
+        last_version=$(latest_test_release)
+        if [[ -n "$last_version" ]]; then
+            echo -e "${green}开始安装 v2node 测试版 ${last_version}${plain}"
+        else
+            echo -e "${yellow}没有找到带版本号的测试版，改为安装 dev 分支的滚动构建${plain}"
+            last_version="beta"
+        fi
+        url="https://github.com/wyusgw/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 v2node 测试版失败，请确保你的服务器能够下载 Github 的文件，或者 dev 分支还没有构建产物${plain}"

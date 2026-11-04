@@ -262,7 +262,8 @@ list_release_versions() {
     [[ -n "$list" ]] && echo "$list"
 }
 
-# Print a numbered version list. $1: installed version, rest: versions.
+# Print a numbered version list. $1: installed version, rest: versions. The first entry is
+# marked as the newest only when an update is available, i.e. it is not the installed version.
 print_version_list() {
     local installed="$1" i mark label
     shift
@@ -270,9 +271,11 @@ print_version_list() {
     for i in "${!versions[@]}"; do
         label="${versions[$i]}"
         mark=""
-        [[ $i -eq 0 && -z "$searching" ]] && mark="  最新"
         if [[ -n "$installed" && "${label#[vV]}" == "${installed#[vV]}" ]]; then
-            mark="${mark}  ${green}<- 当前版本${plain}"
+            mark="  ${green}<- 当前版本${plain}"
+        elif [[ $i -eq 0 && -z "$searching" ]]; then
+            # The newest version, marked only when it is not the installed one
+            mark="  最新"
         fi
         echo -e "  $((i + 1)). ${label}${mark}"
     done

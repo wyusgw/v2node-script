@@ -344,7 +344,6 @@ choose_update_version() {
             echo -e "${red}序号超出范围，请重新输入${plain}"
         fi
     done
-    echo -e "将安装版本: ${green}${chosen_version:-最新版}${plain}"
 }
 
 update() {
@@ -352,6 +351,22 @@ update() {
     if [[ $# == 0 ]]; then
         choose_update_version
         version="$chosen_version"
+        # Nothing to do when the target is the channel's latest version and it is already
+        # installed. Looked up fresh rather than from the menu's cache, which can be stale.
+        local installed="" latest target
+        if [[ -f /usr/local/v2node/v2node ]]; then
+            installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
+        fi
+        if [[ -n "$installed" ]]; then
+            latest=$(fetch_latest_version)
+            target="${version:-$latest}"
+            if [[ -n "$latest" && "${target#[vV]}" == "${latest#[vV]}" && "${installed#[vV]}" == "${latest#[vV]}" ]]; then
+                echo -e "${green}当前版本 ${installed} 已是最新版本${plain}"
+                before_show_menu
+                return 0
+            fi
+        fi
+        echo -e "将安装版本: ${green}${version:-最新版}${plain}"
     else
         version=$2
     fi

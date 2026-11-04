@@ -443,7 +443,7 @@ install_v2node() {
     cd /usr/local/v2node/
 
     if [[ -z "$version_param" && "$channel" == "beta" ]]; then
-        echo -e "${yellow}当前安装分支: 测试版（dev 分支滚动构建，可能不稳定）${plain}"
+        echo -e "${yellow}当前安装分支: 测试版 (dev分支滚动构建可能不稳定)${plain}"
         last_version="beta"
         url="https://github.com/wyusgw/v2node/releases/download/beta/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip

@@ -222,15 +222,29 @@ install() {
     fi
 }
 
-# Release versions, newest first, one per line. The releases atom feed is not rate limited,
-# so it is tried first and the API is only the fallback.
-list_release_versions() {
+# All release tags, newest first, one per line. The releases atom feed is not rate limited,
+# so it is tried first and the API is only the fallback. Feed links may encode + as %2B.
+list_release_tags() {
     local list
-    list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##' | grep -E '^[vV]?[0-9]' | awk '!seen[$0]++' | head -15)
+    list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##; s/%2[Bb]/+/g' | awk '!seen[$0]++')
     if [[ -z "$list" ]]; then
-        list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://api.github.com/repos/wyusgw/v2node/releases?per_page=15" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '^[vV]?[0-9]')
+        list=$(curl -Ls --connect-timeout 3 --max-time 6 "https://api.github.com/repos/wyusgw/v2node/releases?per_page=30" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     fi
     echo "$list"
+}
+
+# Versions of the current channel, newest first, one per line. The stable channel lists plain
+# release versions (v1.2.3). The beta channel lists the rolling dev build "beta" first, then
+# test releases: tags with a suffix after the version number, such as v0.1.6+beta.
+list_release_versions() {
+    local tags
+    tags=$(list_release_tags)
+    if [[ "$(get_channel)" == "beta" ]]; then
+        echo "beta"
+        echo "$tags" | grep -E '^[vV]?[0-9]' | grep -vE '^[vV]?[0-9]+(\.[0-9]+)*$' | head -14
+    else
+        echo "$tags" | grep -E '^[vV]?[0-9]+(\.[0-9]+)*$' | head -15
+    fi
 }
 
 # Sets $chosen_version: empty means the latest version of the current channel.
@@ -248,12 +262,17 @@ choose_update_version() {
     if [[ ${#list[@]} -eq 0 ]]; then
         echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
     else
-        echo -e "可更新的版本（当前: ${installed:-未安装}）:"
+        echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
+        if [[ "$(get_channel)" == "beta" ]]; then
+            echo -e "${yellow}beta 是 dev 分支的滚动构建；要安装正式版请先切换到稳定版分支${plain}"
+        fi
         local i mark
         for i in "${!list[@]}"; do
             mark=""
             [[ $i -eq 0 ]] && mark="  最新"
-            [[ -n "$installed" && "${list[$i]#[vV]}" == "${installed#[vV]}" ]] && mark="${mark}  ${green}<- 当前版本${plain}"
+            if [[ -n "$installed" && ( "${list[$i]#[vV]}" == "${installed#[vV]}" || ( "${list[$i]}" == "beta" && "$installed" == beta-* ) ) ]]; then
+                mark="${mark}  ${green}<- 当前版本${plain}"
+            fi
             echo -e "  $((i + 1)). ${list[$i]}${mark}"
         done
     fi

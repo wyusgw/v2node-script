@@ -299,10 +299,10 @@ choose_update_version() {
         echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
         print_version_list "$installed" "${list[@]}"
     fi
-    echo -e "提示: 输入关键词搜索$(channel_label)的全部版本（如 0.1），只输入 / 列出全部"
+    echo -e "只输入 / 列出全部"
     local input keyword found newest="${list[0]}"
     while true; do
-        read -rp "输入序号或关键词搜索，直接回车(最新版): " input
+        read -rp "输入序号或关键词搜索直接回车(最新版): " input
         if [[ -z "$input" ]]; then
             # The newest test release; the stable channel's latest needs no version.
             if [[ "$(get_channel)" == "beta" && -n "$newest" ]]; then

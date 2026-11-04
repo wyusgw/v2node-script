@@ -296,10 +296,10 @@ choose_update_version() {
     if [[ ${#list[@]} -eq 0 ]]; then
         echo -e "${yellow}获取版本列表失败，请检查本机能否连接 Github，可直接手动输入版本号${plain}"
     else
-        echo -e "$(channel_label)可更新的版本（当前: ${installed:-未安装}）:"
+        echo -e "$(channel_label)可更新的版本(当前: ${installed:-未安装})"
         print_version_list "$installed" "${list[@]}"
     fi
-    echo -e "只输入 / 列出全部"
+    echo -e "提示: 输入关键词搜索$(channel_label)的全部版本(如0.1)只输入 / 列出全部"
     local input keyword found newest="${list[0]}"
     while true; do
         read -rp "输入序号或关键词搜索直接回车(最新版): " input

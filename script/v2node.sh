@@ -1202,9 +1202,9 @@ show_version_header() {
     if script_latest=$(script_has_update); then
         # Show the number only when it is a newer one; a change without a bump shows none
         if [[ -n "$script_latest" && "$script_latest" != "$SCRIPT_VERSION" ]]; then
-            echo -e "  ${yellow}发现管理脚本新版本: v${script_latest}，选 3 更新管理脚本${plain}"
+            echo -e "  ${yellow}发现管理脚本新版本: v${script_latest}${plain}"
         else
-            echo -e "  ${yellow}发现管理脚本新版本，选 3 更新管理脚本${plain}"
+            echo -e "  ${yellow}发现管理脚本新版本${plain}"
         fi
     fi
 }

@@ -275,7 +275,7 @@ print_version_list() {
             mark="  ${green}<- 当前版本${plain}"
         elif [[ $i -eq 0 && -z "$searching" ]]; then
             # The newest version, marked only when it is not the installed one
-            mark="  最新"
+            mark="  <- 最新"
         fi
         echo -e "  $((i + 1)). ${label}${mark}"
     done

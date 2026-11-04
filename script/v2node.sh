@@ -1379,7 +1379,7 @@ show_usage() {
     echo "v2node reload [name]           - 重载实例配置（不重启进程）"
     echo "v2node quick [name]            - 快速配置实例（面板地址/节点ID/密钥/节点类型）"
     echo "v2node generate                - 生成默认实例配置文件"
-    echo "v2node update [version]        - 更新 v2node（不带版本号时在终端里列出版本供选择或手动输入，回车=最新版）"
+    echo "v2node update [version]        - 更新 v2node（不带版本号时列出当前分支的版本，输入序号选择或关键词搜索，回车=最新版）"
     echo "v2node install                 - 安装 v2node"
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看版本信息（管理脚本/已安装/最新）"

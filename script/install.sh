@@ -33,9 +33,6 @@ else
     echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
 fi
 
-########################
-# 参数解析
-########################
 VERSION_ARG=""
 API_HOST_ARG=""
 NODE_ID_ARG=""
@@ -71,7 +68,6 @@ parse_args() {
             --*)
                 echo "未知参数: $1"; exit 1 ;;
             *)
-                # 兼容第一个位置参数作为版本号
                 if [[ -z "$VERSION_ARG" ]]; then
                     VERSION_ARG="$1"; shift
                 else
@@ -93,9 +89,7 @@ is_cmd_exist() {
     return 2
 }
 
-# 安装分支：stable=正式发布版（releases/latest），beta=dev 分支滚动构建的测试版。
-# 所有实例共用同一个分支设置（跟主程序共用一样，不分实例），记录在这个文件里，
-# 下次 install/update 不带 --channel 时就沿用它，不用每次都重新选
+# Install channel (stable or beta), shared by all instances and reused when --channel is omitted
 CHANNEL_FILE="/etc/v2node/.channel"
 
 get_channel() {
@@ -106,8 +100,7 @@ get_channel() {
     fi
 }
 
-# 实例名为空时对应原本的默认实例（/etc/v2node/config.json, v2node.service），
-# 保证没有用到 --instance 的既有用法完全不受影响
+# An empty instance name is the default instance (/etc/v2node/config.json, v2node.service)
 instance_service_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -124,8 +117,7 @@ instance_config_path() {
     fi
 }
 
-# Panel defaults come from the most recently modified existing instance config, so the key is not
-# kept in a second plaintext file. Sets last_host / last_key (empty when there is no config).
+# Panel defaults come from the newest instance config, so the key is not stored twice
 load_panel_defaults() {
     last_host=""
     last_key=""
@@ -136,7 +128,6 @@ load_panel_defaults() {
     last_key=$(sed -n 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)
 }
 
-# Show only the ends of a key in prompts
 mask_key() {
     local k="$1"
     if (( ${#k} > 8 )); then
@@ -146,8 +137,6 @@ mask_key() {
     fi
 }
 
-# 命名实例各自一个文件夹（/etc/v2node/instances/<name>/），方便直接靠目录
-# 列表枚举有哪些实例；默认实例沿用原本的 /etc/v2node/config.json，不进文件夹
 instance_dir() {
     if [[ -z "$1" ]]; then
         echo "/etc/v2node"
@@ -156,9 +145,8 @@ instance_dir() {
     fi
 }
 
-# alpine openrc 没有 systemd 的 template unit，用「同一个脚本 + 不同文件名的
-# symlink」实现多实例：openrc 会把脚本被调用时的文件名放进 $SVCNAME，脚本本身
-# 再据此推出要读哪个实例的配置文件（见 install_v2node 里写入的 /etc/init.d/v2node）
+# openrc has no template units: each instance is a symlink to one script, which finds
+# its instance from $SVCNAME
 instance_init_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -213,12 +201,10 @@ elif [[ x"${release}" == x"debian" ]]; then
 fi
 
 install_base() {
-    # 优化版本：批量检查和安装包，减少系统调用
     need_install_apt() {
         local packages=("$@")
         local missing=()
         
-        # 批量检查已安装的包
         local installed_list=$(dpkg-query -W -f='${Package}\n' 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -238,7 +224,6 @@ install_base() {
         local packages=("$@")
         local missing=()
         
-        # 批量检查已安装的包
         local installed_list=$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -257,7 +242,6 @@ install_base() {
         local packages=("$@")
         local missing=()
         
-        # 批量检查已安装的包
         local installed_list=$(apk info 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
@@ -272,9 +256,7 @@ install_base() {
         fi
     }
 
-    # 一次性安装所有必需的包
     if [[ x"${release}" == x"centos" ]]; then
-        # 检查并安装 epel-release
         if ! rpm -q epel-release >/dev/null 2>&1; then
             echo "安装 EPEL 源..."
             yum install -y epel-release >/dev/null 2>&1
@@ -293,23 +275,18 @@ install_base() {
     elif [[ x"${release}" == x"arch" ]]; then
         echo "更新包数据库..."
         pacman -Sy --noconfirm >/dev/null 2>&1
-        # --needed 会跳过已安装的包，非常高效
         echo "安装必需的包..."
         pacman -S --noconfirm --needed wget curl unzip tar cronie socat ca-certificates pv >/dev/null 2>&1
     fi
 }
 
 # 0: running, 1: not running, 2: not installed
-# $1 (可选): 实例名，省略时查默认实例
 check_status() {
     local instance="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
-    # 用配置文件是否存在判断这个实例有没有配置过，而不是去 grep
-    # systemctl list-unit-files——template unit 实例化出来的具体单元名
-    # （如 v2node@test.service）通常不会出现在 list-unit-files 里，之前
-    # 这样判断会导致命名实例明明装好在跑，却一直被判定成"未安装"
+    # Check the config file: template instances such as v2node@x are not in list-unit-files
     if [[ ! -f "$(instance_config_path "$instance")" ]]; then
         return 2
     fi
@@ -397,8 +374,7 @@ EOF
         fi
 }
 
-# Newest test release tag, empty when none is found. The releases feed is not rate limited,
-# so it is tried first; feed links may encode + as %2B.
+# The releases feed is not rate limited, so it is tried first; links may encode + as %2B
 latest_test_release() {
     local tags
     tags=$(curl -Ls --connect-timeout 3 --max-time 6 "https://github.com/wyusgw/v2node/releases.atom" 2>/dev/null | grep -o 'releases/tag/[^"<]*' | sed 's#releases/tag/##; s/%2[Bb]/+/g')
@@ -415,8 +391,6 @@ install_v2node() {
     local svc=$(instance_service_name "$instance")
     local had_binary=false
     [[ -f /usr/local/v2node/v2node ]] && had_binary=true
-    # Updating the default instance keeps its state: it is restarted only if it was running, and
-    # stays enabled at boot only if it was. Fresh installs and new instances start and are enabled.
     local was_running=true was_enabled=true
     if [[ -z "$instance" && $had_binary == true && -f "$cfg" ]]; then
         check_status "$instance" || was_running=false
@@ -439,9 +413,7 @@ install_v2node() {
         echo "$channel" > "$CHANNEL_FILE"
     fi
 
-    # 加实例时如果主程序已经装好了，就不要重新下载/解压——那会把正在跑的
-    # 默认实例（或其他已存在实例）用的那份二进制文件从脚下抽掉。二进制、
-    # geoip/geosite 是所有实例共用的一份，只有配置和 service 是各实例独立的。
+    # Do not re-extract once installed: the binary and geo files are shared by running instances
     if [[ -n "$instance" && -f /usr/local/v2node/v2node ]]; then
         echo -e "${green}检测到 v2node 主程序已安装，跳过重新下载，仅为实例 [${instance}] 配置服务${plain}"
         last_version=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
@@ -455,9 +427,6 @@ install_v2node() {
 
     if [[ -z "$version_param" && "$channel" == "beta" ]]; then
         echo -e "${yellow}当前安装分支: 测试版 (dev分支滚动构建可能不稳定)${plain}"
-        # The newest test release (a tag with a suffix after the version number, such as
-        # v0.1.7+beta), the same one the management script lists first. The rolling dev build
-        # is only the fallback when no test release can be found.
         last_version=$(latest_test_release)
         if [[ -n "$last_version" ]]; then
             echo -e "${green}开始安装 v2node 测试版 ${last_version}${plain}"
@@ -481,7 +450,6 @@ install_v2node() {
             exit 1
         fi
     else
-        # Release tags are written v1.2.3: accept the number with or without the v, keep other tags such as beta as given
         if [[ "$version_param" =~ ^[vV]?[0-9] ]]; then
             last_version="v${version_param#[vV]}"
         else
@@ -498,7 +466,6 @@ install_v2node() {
     unzip v2node-linux.zip
     rm v2node-linux.zip -f
     chmod +x v2node
-    # Report the version the binary says it is, not the tag it was downloaded under
     installed_version=$(./v2node version 2>/dev/null | awk '{print $2}')
     [[ -n "$installed_version" ]] && last_version="$installed_version"
     mkdir /etc/v2node/ -p
@@ -506,9 +473,6 @@ install_v2node() {
     cp geosite.dat /etc/v2node/
     fi
 
-    # service/init 脚本对所有实例都是共用同一份定义（systemd 的 template unit
-    # 用 %i 代入实例名；openrc 用同一个脚本 + $SVCNAME 判断自己是哪个实例），
-    # 每次都幂等地重写一遍，不管这次是不是为了加实例
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/v2node -f
         cat <<EOF > /etc/init.d/v2node
@@ -539,7 +503,6 @@ EOF
         if [[ -z "$instance" ]]; then
             [[ $was_enabled == true ]] && rc-update add v2node default
         else
-            # openrc 靠脚本文件名认实例，做一个指到同一份脚本的 symlink
             ln -sf /etc/init.d/v2node "/etc/init.d/$(instance_init_name "$instance")"
             rc-update add "$(instance_init_name "$instance")" default
         fi
@@ -574,8 +537,6 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
         fi
-        # 命名实例走 template unit（v2node@.service，%i 是实例名），一直存在、
-        # 幂等重写，不影响默认实例已经在用的 v2node.service
         rm /etc/systemd/system/v2node@.service -f
         cat <<EOF > /etc/systemd/system/v2node@.service
 [Unit]
@@ -614,7 +575,6 @@ EOF
     fi
 
     if [[ ! -f "$cfg" ]]; then
-        # 如果通过 CLI 传入了完整参数，则直接生成配置并跳过交互
         if [[ -n "$API_HOST_ARG" && -n "$NODE_ID_ARG" && -n "$API_KEY_ARG" ]]; then
             generate_v2node_config "$API_HOST_ARG" "$NODE_ID_ARG" "$API_KEY_ARG" "$NODE_TYPE_ARG" "$instance"
             echo -e "${green}已根据参数生成 ${cfg}${plain}"
@@ -626,8 +586,7 @@ EOF
         echo -e "${yellow}默认实例更新前未运行，保持停止，下次启动时会用上新版本${plain}"
         first_install=false
     else
-        # restart rather than start: openrc's start is a no-op for an instance that is already
-        # running, which would leave it on the old binary
+        # restart, not start: openrc's start skips a running instance, leaving the old binary
         if [[ x"${release}" == x"alpine" ]]; then
             service $(instance_init_name "$instance") restart
         else
@@ -673,10 +632,7 @@ EOF
     echo "v2node uninstall               - 卸载 v2node（连同所有实例）"
     echo "v2node version                 - 查看 v2node 版本"
     echo "----------------------------------------------------------"
-    # curl -fsS --max-time 10 "https://api.v-50.me/counter" || true
 
-    # When only named instances exist, an update has no default instance to configure,
-    # so do not ask about generating the default config
     if [[ $first_install == true && $had_binary == true && -z "$instance" ]] && compgen -G "/etc/v2node/instances/*/config.json" >/dev/null; then
         first_install=false
     fi
@@ -684,8 +640,6 @@ EOF
     if [[ $first_install == true ]]; then
         read -rp "检测到 ${cfg} 还不存在，是否现在生成？(y/n): " if_generate
         if [[ "$if_generate" =~ ^[Yy]$ ]]; then
-            # 交互式收集参数，如果之前配置过其他实例，读上次用过的面板地址/
-            # 密钥当默认值，直接回车即可沿用
             local last_host="" last_key=""
             load_panel_defaults
 
@@ -720,8 +674,7 @@ if [[ x"${release}" != x"alpine" ]]; then
     fi
 fi
 
-# 面板给的安装命令在判断不出本机已有别的节点时不带 --instance；这时在已有默认实例上装另一个
-# 节点ID只会走更新流程，不会生成新节点的配置。节点ID不在任何已有配置里时，自动给它单独建实例
+# Panel install commands omit --instance: a node ID in no existing config gets its own instance
 auto_instance_name() {
     [[ -z "$INSTANCE_ARG" && -n "$API_HOST_ARG" && -n "$API_KEY_ARG" ]] || return 0
     [[ "$NODE_ID_ARG" =~ ^[0-9]+$ ]] || return 0

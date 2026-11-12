@@ -90,8 +90,7 @@ is_cmd_exist() {
     return 2
 }
 
-# 实例名为空时对应默认实例（/etc/v2node/config.json, v2node.service），
-# 保证不带实例名的既有用法完全不受影响
+# An empty instance name is the default instance (/etc/v2node/config.json, v2node.service)
 instance_service_name() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -108,8 +107,7 @@ instance_config_path() {
     fi
 }
 
-# Panel defaults come from the most recently modified existing instance config, so the key is not
-# kept in a second plaintext file. Sets last_host / last_key (empty when there is no config).
+# Panel defaults come from the newest instance config, so the key is not stored twice
 load_panel_defaults() {
     last_host=""
     last_key=""
@@ -120,7 +118,6 @@ load_panel_defaults() {
     last_key=$(sed -n 's/.*"ApiKey"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)
 }
 
-# Show only the ends of a key in prompts
 mask_key() {
     local k="$1"
     if (( ${#k} > 8 )); then
@@ -130,8 +127,6 @@ mask_key() {
     fi
 }
 
-# 命名实例各自一个文件夹（/etc/v2node/instances/<name>/）；默认实例沿用原本
-# 的 /etc/v2node/config.json，不进文件夹
 instance_dir() {
     if [[ -z "$1" ]]; then
         echo "/etc/v2node"
@@ -148,7 +143,6 @@ instance_init_name() {
     fi
 }
 
-# 统一给日志/提示用的名字：默认实例就叫"v2node"，命名实例叫"实例 [name]"
 instance_label() {
     if [[ -z "$1" ]]; then
         echo "v2node"
@@ -157,7 +151,6 @@ instance_label() {
     fi
 }
 
-# 主菜单"管理实例 [xxx]"里显示的名字：默认实例显示为 default
 instance_display_name() {
     if [[ -z "$1" ]]; then
         echo "default"
@@ -166,7 +159,6 @@ instance_display_name() {
     fi
 }
 
-# 安装分支跟 install.sh 共用同一个文件，两边各自读，不互相调用
 CHANNEL_FILE="/etc/v2node/.channel"
 
 get_channel() {
@@ -201,12 +193,7 @@ confirm() {
     fi
 }
 
-# 只负责等用户按下 Enter，不在这里递归调用 show_menu——所有跟这个函数
-# 一样"跑完一个动作要回到主菜单"的地方，最终都是靠脚本最外层的 while
-# 循环重新显示菜单，不是靠函数互相递归。长时间使用同一个交互会话、反复
-# 在菜单间跳转时，递归调用 show_menu 会让 bash 的函数调用栈越叠越深、
-# 永远不会收回来，用久了可能把 shell 的调用栈撑爆，看起来就像脚本无缘
-# 无故直接退出
+# Only waits for Enter: calling show_menu here would grow the call stack until bash exits
 before_show_menu() {
     echo && echo -n -e "${yellow}按回车返回主菜单: ${plain}" && read temp
 }
@@ -222,8 +209,7 @@ install() {
     fi
 }
 
-# All release tags, newest first, one per line. The releases atom feed is not rate limited,
-# so it is tried first and the API is only the fallback. Feed links may encode + as %2B.
+# The releases feed is not rate limited, so it is tried first; links may encode + as %2B.
 # With "all" the API comes first: the feed holds only the newest few releases.
 list_release_tags() {
     local list="" api="https://api.github.com/repos/wyusgw/v2node/releases?per_page=100"
@@ -240,10 +226,6 @@ list_release_tags() {
     echo "$list"
 }
 
-# Versions of the current channel, newest first, one per line. The stable channel lists plain
-# release versions (v1.2.3); the beta channel lists test releases, tags with a suffix after
-# the version number such as v0.1.6+beta.
-# $1: "all" to list every version instead of the newest 15. $2: keyword to keep only matches.
 list_release_versions() {
     local scope="$1" keyword="$2" tags list
     tags=$(list_release_tags "$scope")
@@ -262,8 +244,6 @@ list_release_versions() {
     [[ -n "$list" ]] && echo "$list"
 }
 
-# Print a numbered version list. $1: installed version, rest: versions. The first entry is
-# marked as the newest only when an update is available, i.e. it is not the installed version.
 print_version_list() {
     local installed="$1" i mark label
     shift
@@ -274,17 +254,12 @@ print_version_list() {
         if [[ -n "$installed" && "${label#[vV]}" == "${installed#[vV]}" ]]; then
             mark="  ${green}<- 当前版本${plain}"
         elif [[ $i -eq 0 && -z "$searching" ]]; then
-            # The newest version, marked only when it is not the installed one
             mark="  <- 最新"
         fi
         echo -e "  $((i + 1)). ${label}${mark}"
     done
 }
 
-# Sets $chosen_version: empty means the latest version of the current channel.
-# Accepts a number from the list, Enter for the latest, or text to search every version of the
-# current channel (a leading / is optional; / alone lists them all). Typed text is always a
-# search, so a version is always picked from a list by its number.
 choose_update_version() {
     chosen_version=""
     searching=""
@@ -307,7 +282,6 @@ choose_update_version() {
     while true; do
         read -rp "输入序号或关键词搜索直接回车(最新版): " input
         if [[ -z "$input" ]]; then
-            # The newest test release; the stable channel's latest needs no version.
             if [[ "$(get_channel)" == "beta" && -n "$newest" ]]; then
                 chosen_version="$newest"
                 break
@@ -336,7 +310,6 @@ choose_update_version() {
             print_version_list "$installed" "${list[@]}"
             searching=""
         elif [[ "$input" =~ ^[0-9]+$ ]]; then
-            # a bare number is a list position, never a version
             if (( input >= 1 && input <= ${#list[@]} )); then
                 chosen_version="${list[$((input - 1))]}"
                 break
@@ -351,8 +324,7 @@ update() {
     if [[ $# == 0 ]]; then
         choose_update_version
         version="$chosen_version"
-        # Nothing to do when the target is the channel's latest version and it is already
-        # installed. Looked up fresh rather than from the menu's cache, which can be stale.
+        # Looked up fresh rather than from the menu's cache, which can be stale
         local installed="" latest target
         if [[ -f /usr/local/v2node/v2node ]]; then
             installed=$(/usr/local/v2node/v2node version 2>/dev/null | awk '{print $2}')
@@ -372,9 +344,7 @@ update() {
     fi
     bash <(curl -Ls https://raw.githubusercontent.com/wyusgw/v2node-script/refs/heads/main/script/install.sh) $version
     if [[ $? == 0 ]]; then
-        # install.sh has already restarted the default instance if it was running. Named
-        # instances keep running the old binary until restarted, so restart the running ones
-        # here the same way; stopped ones stay stopped and pick up the new binary on next start.
+        # install.sh restarts only the default instance; restart the running named ones
         local named=() d
         if [[ -d /etc/v2node/instances ]]; then
             for d in /etc/v2node/instances/*/; do
@@ -405,7 +375,6 @@ update() {
     fi
 }
 
-# $1: silent(非空=不返回主菜单，供CLI用)
 switch_channel() {
     local silent="$1"
     local cur target target_label
@@ -439,7 +408,6 @@ switch_channel() {
     [[ -z "$silent" ]] && before_show_menu
 }
 
-# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 config() {
     local name="$1"
     local silent="$2"
@@ -475,7 +443,6 @@ config() {
     fi
 }
 
-# 完全卸载：连同所有命名实例一起停用/移除，不留下孤儿 service
 uninstall() {
     confirm "确定要卸载 v2node 吗（会连同所有实例一起移除）?" "n"
     if [[ $? != 0 ]]; then
@@ -520,8 +487,7 @@ uninstall() {
     fi
 }
 
-# 重载配置：程序监听配置文件的写入事件，原地重写一次内容即可触发重载（约 5 秒后生效，
-# 10 秒内的重复触发会被合并），不需要重启进程
+# The program reloads on writes to its config file, so rewriting it in place reloads it
 reload_config() {
     local name="$1"
     local silent="$2"
@@ -537,8 +503,6 @@ reload_config() {
     if [[ -z "$silent" ]]; then before_show_menu; fi
 }
 
-# 快速配置：只改面板地址、节点ID、密钥和节点类型，以当前值作默认值，直接回车即保持不变；
-# 配置文件里其他内容（日志、超时等）原样保留，改完重启该实例
 quick_config() {
     local name="$1"
     local silent="$2"
@@ -602,9 +566,7 @@ quick_config() {
     if [[ -z "$silent" ]]; then before_show_menu; fi
 }
 
-# 以下生命周期指令统一格式: FUNC [实例名] [silent]
-# 实例名留空 = 默认实例(v2node.service / /etc/v2node/config.json)
-# silent 非空时不会在结尾进交互菜单，供 CLI 直接调用；菜单调用时留空即可
+# Lifecycle functions take [instance] [silent]; silent skips returning to the menu
 
 start() {
     local name="$1"
@@ -728,7 +690,6 @@ disable() {
     fi
 }
 
-# $1: 实例名  $2: follow(非空则用 -f 持续跟随，否则只看最后1000行)  $3: silent
 log() {
     local name="$1"
     local follow="$2"
@@ -765,16 +726,12 @@ update_shell() {
 }
 
 # 0: running, 1: not running, 2: not installed
-# $1 (可选): 实例名，省略时查默认实例
 check_status() {
     local instance="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         return 2
     fi
-    # 用配置文件是否存在判断这个实例有没有配置过，而不是去 grep
-    # systemctl list-unit-files——template unit 实例化出来的具体单元名
-    # （如 v2node@test.service）通常不会出现在 list-unit-files 里，之前
-    # 这样判断会导致命名实例明明装好在跑，却一直被判定成"未安装"
+    # Check the config file: template instances such as v2node@x are not in list-unit-files
     if [[ ! -f "$(instance_config_path "$instance")" ]]; then
         return 2
     fi
@@ -788,8 +745,7 @@ check_status() {
         fi
     else
         local svc=$(instance_service_name "$instance")
-        # "systemctl status" also reads the journal tail, which is slow on hosts with large
-        # journals and runs for every instance on each menu display; SubState needs no journal
+        # Not systemctl status, which reads the journal tail and is slow on large journals
         temp=$(systemctl show -p SubState "${svc}" 2>/dev/null | cut -d= -f2)
         if [[ x"${temp}" == x"running" ]]; then
             return 0
@@ -799,7 +755,6 @@ check_status() {
     fi
 }
 
-# $1 (可选): 实例名，省略时查默认实例
 check_enabled() {
     local instance="$1"
     if [[ x"${release}" == x"alpine" ]]; then
@@ -835,7 +790,6 @@ check_uninstall() {
     fi
 }
 
-# $1: 实例名(空=默认实例) $2: silent(非空=不返回主菜单，供CLI用)
 check_install() {
     local instance="$1"
     local silent="$2"
@@ -852,9 +806,6 @@ check_install() {
     fi
 }
 
-# 只检查 v2node 主程序是否已安装，不看任何单个实例的配置，
-# 供 update/version/list/uninstall 这类不针对某个实例的全局命令使用
-# $1: silent(非空=不返回主菜单，供CLI用)
 check_binary_install() {
     local silent="$1"
     if [[ ! -f /usr/local/v2node/v2node ]]; then
@@ -869,7 +820,6 @@ check_binary_install() {
     fi
 }
 
-# 列出默认实例 + 所有命名实例及各自状态（v2node list）
 list() {
     echo "已知实例:"
     if [[ -f /etc/v2node/config.json ]]; then
@@ -895,8 +845,6 @@ list() {
     fi
 }
 
-# 新建一个命名实例（v2node new <name>），交互式收集面板信息后委托给
-# install.sh --instance 处理（下载/跳过下载共用二进制、写 service、生成配置）
 new() {
     local name="$1"
     local silent="$2"
@@ -914,8 +862,6 @@ new() {
         return 1
     fi
 
-    # 如果之前配置过其他实例（或默认实例），读上次用过的面板地址/密钥当
-    # 默认值，直接回车即可沿用，不用每次都重新输入同一个面板的信息
     local last_host="" last_key=""
     load_panel_defaults
 
@@ -936,7 +882,6 @@ new() {
     if [[ -z "$silent" ]]; then before_show_menu; fi
 }
 
-# 移除一个或多个命名实例（v2node remove <name> [name...]），不影响默认实例
 remove() {
     if [[ $# == 0 ]]; then
         echo -e "${red}请指定实例名: v2node remove <name> [name...]${plain}"
@@ -963,7 +908,6 @@ remove() {
     done
 }
 
-# 重命名一个命名实例（v2node rename <old> <new>），默认实例不支持重命名
 rename() {
     local old="$1"
     local new_name="$2"
@@ -1007,8 +951,6 @@ rename() {
     echo -e "${green}实例 [${old}] 已重命名为 [${new_name}]${plain}"
 }
 
-# 管理单一实例的子菜单（主菜单「管理实例 [xxx]」进来的），default 实例不给
-# 重命名/移除，要移除默认实例请走「完全卸载」
 instance_submenu() {
     local name="$1"
     local max=13
@@ -1088,8 +1030,7 @@ instance_submenu() {
     before_show_menu
 }
 
-# Look up the latest published version with short timeouts so an unreachable GitHub cannot hang the menu.
-# The releases page redirect is the fallback when the API is rate limited or blocked.
+# Short timeouts so an unreachable GitHub cannot hang the menu
 fetch_latest_version() {
     local latest
     if [[ "$(get_channel)" == "beta" ]]; then
@@ -1103,9 +1044,7 @@ fetch_latest_version() {
     echo "$latest"
 }
 
-# Print the cached latest version, refreshing it first when missing or older than 30 minutes.
-# After a failed lookup the next attempt waits 5 minutes, so an unreachable GitHub costs a few
-# seconds at most once per 5 minutes instead of on every menu display.
+# Cached for 30 minutes; a failed lookup waits 5 minutes before the next try
 get_latest_version() {
     local dir="/run"
     [[ -d "$dir" && -w "$dir" ]] || dir="/tmp"
@@ -1126,8 +1065,7 @@ get_latest_version() {
     [[ -s "$cache" ]] && cat "$cache"
 }
 
-# True only when $1 is a strictly newer release than $2 (v prefix ignored). Anything that is not a
-# plain numeric version, such as the beta channel's beta-<commit>, falls back to "different means newer".
+# Non-numeric versions such as beta-<commit> fall back to "different means newer"
 version_is_newer() {
     local a="${1#[vV]}" b="${2#[vV]}"
     [[ "$a" == "$b" ]] && return 1
@@ -1147,11 +1085,7 @@ version_is_newer() {
     return 1
 }
 
-# True when the main copy of this script on GitHub differs from the installed /usr/bin/v2node,
-# printing the main copy's SCRIPT_VERSION (empty if it has none). The files are compared by
-# checksum, so a change whose SCRIPT_VERSION was not bumped is still noticed. The
-# remote checksum is cached for 30 minutes, and a failed download waits 5 minutes before the
-# next try, so an unreachable GitHub costs a few seconds at most once per 5 minutes.
+# Compared by checksum, so a change without a SCRIPT_VERSION bump is still noticed
 script_has_update() {
     [[ -f /usr/bin/v2node ]] || return 1
     local dir="/run"
@@ -1182,7 +1116,6 @@ script_has_update() {
     sed -n 2p "$cache"
 }
 
-# 主菜单顶部的版本信息行，实时查 GitHub 最新版本、有更新就提示
 show_version_header() {
     local installed=""
     if [[ -f /usr/local/v2node/v2node ]]; then
@@ -1200,7 +1133,6 @@ show_version_header() {
     fi
     local script_latest
     if script_latest=$(script_has_update); then
-        # Show the number only when it is a newer one; a change without a bump shows none
         if [[ -n "$script_latest" && "$script_latest" != "$SCRIPT_VERSION" ]]; then
             echo -e "  ${yellow}发现管理脚本新版本: v${script_latest}${plain}"
         else
@@ -1209,8 +1141,6 @@ show_version_header() {
     fi
 }
 
-# 主菜单底部的实例列表：default + 所有命名实例，各自的运行状态/开机自启/
-# 配置文件路径都列出来，格式对齐 soga 的「实例列表」
 show_instance_list() {
     echo ""
     echo "  实例列表:"
@@ -1245,11 +1175,8 @@ show_instance_list() {
     fi
 }
 
-# 安装/更新合并成一个入口：还没装就安装，已经装了就更新，对齐 soga 的「安装/更新」
 install_or_update() {
-    # check_status "" only looks at the default instance, so it reports "not installed" whenever
-    # the default instance has no config (e.g. only named instances exist) and would wrongly run a
-    # fresh install, which wipes the shared binary directory
+    # check_status "" sees only the default instance; a fresh install would wipe the shared binary
     if [[ ! -f /usr/local/v2node/v2node ]]; then
         install
     else
@@ -1257,7 +1184,6 @@ install_or_update() {
     fi
 }
 
-# $1: silent(非空=不返回主菜单，供CLI用)。最新版本是即时查询的，不读缓存，网络不通时只显示"查询失败"
 show_v2node_version() {
     local installed=""
     if [[ -f /usr/local/v2node/v2node ]]; then
@@ -1363,7 +1289,6 @@ EOF
 
 
 generate_config_file() {
-    # 交互式收集参数，如果之前配置过实例，读上次用过的面板地址/密钥当默认值
     local last_host="" last_key=""
     load_panel_defaults
 
@@ -1382,7 +1307,6 @@ generate_config_file() {
     generate_v2node_config "$api_host" "$node_id" "$api_key" "$node_type"
 }
 
-# 放开防火墙端口
 open_ports() {
     systemctl stop firewalld.service 2>/dev/null
     systemctl disable firewalld.service 2>/dev/null
@@ -1441,9 +1365,6 @@ show_menu() {
   ${green}6.${plain} 查看版本
 ————————————————"
 
-    # 每个已存在的实例各自一行"管理实例 [xxx]"，从 7 开始依序编号，
-    # 而不是只有一行、靠输入实例名切换焦点——实例数量本来就不多，直接
-    # 每个都给一个号码更直觉
     local menu_instances=()
     if [[ -f /etc/v2node/config.json ]]; then
         menu_instances+=("")
@@ -1528,8 +1449,7 @@ if [[ $# > 0 ]]; then
         "quick") check_install "$2" 0 && quick_config "$2" 0 ;;
         "update")
             if check_binary_install 0; then
-                # No version given on a terminal: show the version list like the menu does.
-                # Scripts and pipes (no terminal) keep updating straight to the latest version.
+                # On a terminal without a version, list versions; scripts update to the latest
                 if [[ -z "$2" && -t 0 ]]; then
                     choose_update_version
                     update 0 "$chosen_version"
@@ -1562,9 +1482,7 @@ if [[ $# > 0 ]]; then
         *) show_usage
     esac
 else
-    # 交互模式靠这个外层循环反复重新显示主菜单，show_menu/before_show_menu/
-    # instance_submenu 彼此之间不会再递归调用对方，调用栈不会随着使用时长
-    # 无限变深
+    # This loop redraws the menu; menu functions never call each other recursively
     while true; do
         show_menu
     done
